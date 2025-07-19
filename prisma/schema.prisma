@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                Int       @id @default(autoincrement())
+  name              String
+  email             String    @unique
+  password          String
+  role              String
+  active            Boolean   @default(true)
+  lastLogin         DateTime?
+  resetToken        String?
+  resetTokenExpires DateTime?
+   createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  @@map("users")
+}
+
+model Club {
+  id               Int       @id @default(autoincrement())
+  clubName         String
+  affiliationNumber String
+  city             String
+  address          String
+  mobile          String
+  email            String
+  password         String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Group{
+  id               Int       @id @default(autoincrement())
+  groupName        String
+  gender           String     
+  age              String    
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  competitions     Competition[]
+  players          Player[]
+  @@map("groups")
+}
+
+model Competition{
+  id               Int       @id @default(autoincrement())
+  competitionName  String
+  maxPlayers       Int
+  date             String
+  age              String
+  lastEntryDate    String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  groups           Group[]
+}
+
+model Player {
+  id               Int       @id @default(autoincrement())
+  uniqueIdNumber   String    @unique
+  firstName        String
+  middleName       String?
+  lastName         String
+  dateOfBirth      DateTime
+  position         String?
+  address          String
+  mobile           String
+  aadharNumber     String    @unique
+  aadharVerified   Boolean   @default(false)
+  isSuspended      Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  groups           Group[]
+
+  @@map("players")
+}

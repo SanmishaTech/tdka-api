@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CrediSphere Logo - simple flat SVG -->
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Sphere arcs -->
+  <g stroke="#02C39A" stroke-width="6" stroke-linecap="round">
+    <!-- vertical arc -->
+    <path d="M128 32C164 32 192 80 192 128C192 176 164 224 128 224"/>
+    <path d="M128 32C92 32 64 80 64 128C64 176 92 224 128 224"/>
+    <!-- horizontal arc -->
+    <ellipse cx="128" cy="128" rx="96" ry="32" />
+  </g>
+
+  <!-- Letter C -->
+  <path d="M167 83C155 70 139 64 120 64C86 64 58 92 58 128C58 164 86 192 120 192C139 192 155 186 167 173" stroke="#2F65F9" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
