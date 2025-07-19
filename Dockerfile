@@ -1,53 +1,34 @@
-# CrediSphere API Dockerfile
-# Multi-stage build for optimized production image
-
-FROM node:20-alpine AS builder
+# Use official Node.js image as build stage
+FROM node:18 AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Install dependencies
 COPY package*.json ./
-
-# Install all dependencies (including dev dependencies for build)
 RUN npm install
 
-# Copy source code
+# Copy source files
 COPY . .
 
-# Generate Prisma client
-RUN npx prisma generate
-
-# Production stage
-FROM node:20-alpine AS production
+# Production image
+FROM node:18-slim
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install OpenSSL for Prisma and ffmpeg
+RUN apt-get update -y && apt-get install -y openssl
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
+# Copy only necessary files from builder
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/.env ./
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/server.js ./
 
-# Copy package files
-COPY package*.json ./
-
-# Install only production dependencies
-RUN npm ci --omit=dev && npm cache clean --force
-
-# Copy built application from builder stage
-COPY --from=builder --chown=nodejs:nodejs /app .
-
-# Switch to non-root user
-USER nodejs
-
-# Expose API port
+# Expose port (match your .env PORT)
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
-
-# Start the server with dumb-init
-ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "server.js"]
+# Start the app with migration
+# CMD npx prisma migrate dev --name init && npx prisma generate && npm run seed && npm start
+CMD npx prisma generate && npm start
