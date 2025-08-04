@@ -17,7 +17,7 @@ model User {
   lastLogin         DateTime?
   resetToken        String?
   resetTokenExpires DateTime?
-   createdAt         DateTime  @default(now())
+  createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   @@map("users")
 }
@@ -31,8 +31,29 @@ model Club {
   mobile          String
   email            String
   password         String
+  
+  // Chairman details
+  chairmanName     String?
+  chairmanMobile   String?
+  chairmanEmail    String?
+  chairmanAadhar   String?
+  
+  // Secretary details
+  secretaryName    String?
+  secretaryMobile  String?
+  secretaryEmail   String?
+  secretaryAadhar  String?
+  
+  // Treasurer details
+  treasurerName    String?
+  treasurerMobile  String?
+  treasurerEmail   String?
+  treasurerAadhar  String?
+  
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  competitions     Competition[]
+  playerClubs      PlayerClub[]
 }
 
 model Group{
@@ -57,6 +78,7 @@ model Competition{
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   groups           Group[]
+  clubs            Club[]
 }
 
 model Player {
@@ -75,6 +97,29 @@ model Player {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   groups           Group[]
+  playerClubs      PlayerClub[]
 
   @@map("players")
+}
+
+model PlayerClub {
+  id               Int       @id @default(autoincrement())
+  playerId         Int
+  clubId           Int
+  isActive         Boolean   @default(false)
+  joinedAt         DateTime  @default(now())
+  leftAt           DateTime?
+  transferReason   String?
+  approvedBy       String?   // Who approved this transfer
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  player           Player    @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  club             Club      @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  
+  // Ensure a player can only be active in one club at a time
+  @@unique([playerId, isActive], name: "unique_active_player")
+  @@index([playerId])
+  @@index([clubId])
+  @@index([isActive])
 }

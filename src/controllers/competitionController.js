@@ -73,6 +73,13 @@ const getCompetitions = asyncHandler(async (req, res) => {
             age: true,
           },
         },
+        clubs: {
+          select: {
+            id: true,
+            clubName: true,
+            city: true,
+          },
+        },
       },
     }),
     prisma.competition.count({ where }),
@@ -80,8 +87,9 @@ const getCompetitions = asyncHandler(async (req, res) => {
 
   // Format competitions for frontend compatibility
   const enhancedCompetitions = competitions.map(comp => {
-    // Extract group IDs for the frontend
+    // Extract group IDs and club IDs for the frontend
     const groupIds = comp.groups.map(group => group.id.toString());
+    const clubIds = comp.clubs.map(club => club.id.toString());
     
     return {
       id: comp.id,
@@ -92,7 +100,8 @@ const getCompetitions = asyncHandler(async (req, res) => {
       lastEntryDate: comp.lastEntryDate,
       createdAt: comp.createdAt,
       updatedAt: comp.updatedAt,
-      groups: groupIds
+      groups: groupIds,
+      clubs: clubIds
     };
   });
 
@@ -121,6 +130,13 @@ const getCompetition = asyncHandler(async (req, res) => {
           age: true,
         },
       },
+      clubs: {
+        select: {
+          id: true,
+          clubName: true,
+          city: true,
+        },
+      },
     },
   });
   
@@ -136,7 +152,8 @@ const getCompetition = asyncHandler(async (req, res) => {
     lastEntryDate: competition.lastEntryDate,
     createdAt: competition.createdAt,
     updatedAt: competition.updatedAt,
-    groups: competition.groups.map(group => group.id.toString())
+    groups: competition.groups.map(group => group.id.toString()),
+    clubs: competition.clubs.map(club => club.id.toString())
   };
 
   res.json(responseData);
@@ -148,14 +165,15 @@ const createCompetition = asyncHandler(async (req, res) => {
     maxPlayers: z.number().min(1, "Max players must be at least 1").max(1000, "Max players cannot exceed 1000"),
     date: z.string().min(1, "Date is required").max(255),
     groups: z.array(z.string()).min(1, "At least one group must be selected"),
+    clubs: z.array(z.string()).optional(),
     lastEntryDate: z.string().min(1, "Last entry date is required").max(255),
   });
 
   // Will throw Zod errors caught by asyncHandler
   const validatedData = await schema.parseAsync(req.body);
 
-  // Extract groups for separate handling
-  const { groups, ...competitionData } = validatedData;
+  // Extract groups and clubs for separate handling
+  const { groups, clubs, ...competitionData } = validatedData;
   
   // For backward compatibility, store the first group's age as the competition age
   let age = "Multiple groups";
@@ -175,17 +193,23 @@ const createCompetition = asyncHandler(async (req, res) => {
     }
   }
 
-  // Create the competition with the groups relationship
+  // Create the competition with the groups and clubs relationships
   const competition = await prisma.competition.create({ 
     data: {
       ...competitionData,
       age: age,
       groups: {
         connect: groups.map(groupId => ({ id: parseInt(groupId) }))
-      }
+      },
+      ...(clubs && clubs.length > 0 && {
+        clubs: {
+          connect: clubs.map(clubId => ({ id: parseInt(clubId) }))
+        }
+      })
     },
     include: {
-      groups: true
+      groups: true,
+      clubs: true
     }
   });
 
@@ -202,6 +226,7 @@ const updateCompetition = asyncHandler(async (req, res) => {
       maxPlayers: z.number().min(1, "Max players must be at least 1").max(1000, "Max players cannot exceed 1000").optional(),
       date: z.string().min(1).max(255).optional(),
       groups: z.array(z.string()).min(1, "At least one group must be selected").optional(),
+      clubs: z.array(z.string()).optional(),
       lastEntryDate: z.string().min(1).max(255).optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
@@ -212,13 +237,13 @@ const updateCompetition = asyncHandler(async (req, res) => {
 
   const existing = await prisma.competition.findUnique({ 
     where: { id },
-    include: { groups: true }
+    include: { groups: true, clubs: true }
   });
   
   if (!existing) throw createError(404, "Competition not found");
 
-  // Extract groups for separate handling if present
-  const { groups, ...competitionData } = validatedData;
+  // Extract groups and clubs for separate handling if present
+  const { groups, clubs, ...competitionData } = validatedData;
   
   // Update data object for Prisma
   const updateData = { ...competitionData };
@@ -252,11 +277,24 @@ const updateCompetition = asyncHandler(async (req, res) => {
     };
   }
 
+  // Update clubs relationship if provided
+  if (clubs !== undefined) {
+    updateData.clubs = {
+      // Disconnect all existing clubs
+      set: [],
+      // Connect the new clubs if any
+      ...(clubs.length > 0 && {
+        connect: clubs.map(clubId => ({ id: parseInt(clubId) }))
+      })
+    };
+  }
+
   const updated = await prisma.competition.update({
     where: { id },
     data: updateData,
     include: {
-      groups: true
+      groups: true,
+      clubs: true
     }
   });
 

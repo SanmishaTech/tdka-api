@@ -12,6 +12,7 @@ const clubRoutes = require("./routes/club");
 const groupRoutes = require("./routes/group");
 const competitionRoutes = require("./routes/competition");
 const playerRoutes = require("./routes/player");
+const playerClubRoutes = require("./routes/playerClub");
 const authRoutes = require("./routes/auth");
 const swaggerRouter = require("./swagger");
 
@@ -94,6 +95,7 @@ app.use("/api/clubs", clubRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/competitions", competitionRoutes);
 app.use("/api/players", playerRoutes);
+app.use("/api/player-clubs", playerClubRoutes);
  
 app.use(swaggerRouter);
 

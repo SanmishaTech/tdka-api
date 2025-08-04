@@ -76,6 +76,25 @@ const getClubs = asyncHandler(async (req, res) => {
         address: true,
         mobile: true,
         email: true,
+        
+        // Chairman details
+        chairmanName: true,
+        chairmanMobile: true,
+        chairmanEmail: true,
+        chairmanAadhar: true,
+        
+        // Secretary details
+        secretaryName: true,
+        secretaryMobile: true,
+        secretaryEmail: true,
+        secretaryAadhar: true,
+        
+        // Treasurer details
+        treasurerName: true,
+        treasurerMobile: true,
+        treasurerEmail: true,
+        treasurerAadhar: true,
+        
         createdAt: true,
         updatedAt: true,
       },
@@ -107,6 +126,25 @@ const getClub = asyncHandler(async (req, res) => {
       address: true,
       mobile: true,
       email: true,
+      
+      // Chairman details
+      chairmanName: true,
+      chairmanMobile: true,
+      chairmanEmail: true,
+      chairmanAadhar: true,
+      
+      // Secretary details
+      secretaryName: true,
+      secretaryMobile: true,
+      secretaryEmail: true,
+      secretaryAadhar: true,
+      
+      // Treasurer details
+      treasurerName: true,
+      treasurerMobile: true,
+      treasurerEmail: true,
+      treasurerAadhar: true,
+      
       createdAt: true,
       updatedAt: true,
     },
@@ -126,6 +164,24 @@ const createClub = asyncHandler(async (req, res) => {
     email: z.string().email("Valid email is required").max(255),
     password: z.string().min(6, "Password must be at least 6 characters").max(255),
     role: z.string().default("clubadmin"),
+    
+    // Chairman details (optional for backward compatibility)
+    chairmanName: z.string().max(255).optional(),
+    chairmanMobile: z.string().max(20).optional(),
+    chairmanEmail: z.string().email("Valid chairman email is required").max(255).optional(),
+    chairmanAadhar: z.string().max(12).optional(),
+    
+    // Secretary details (optional for backward compatibility)
+    secretaryName: z.string().max(255).optional(),
+    secretaryMobile: z.string().max(20).optional(),
+    secretaryEmail: z.string().email("Valid secretary email is required").max(255).optional(),
+    secretaryAadhar: z.string().max(12).optional(),
+    
+    // Treasurer details (optional for backward compatibility)
+    treasurerName: z.string().max(255).optional(),
+    treasurerMobile: z.string().max(20).optional(),
+    treasurerEmail: z.string().email("Valid treasurer email is required").max(255).optional(),
+    treasurerAadhar: z.string().max(12).optional(),
   });
 
   // Will throw Zod errors caught by asyncHandler
@@ -141,7 +197,7 @@ const createClub = asyncHandler(async (req, res) => {
   // Start a transaction to create both club and user
   const result = await prisma.$transaction(async (prisma) => {
     // Create the club
-    const club = await prisma.club.create({ 
+    const club = await prisma.club.create({
       data: {
         clubName: validatedData.clubName,
         affiliationNumber: validatedData.affiliationNumber,
@@ -149,7 +205,25 @@ const createClub = asyncHandler(async (req, res) => {
         address: validatedData.address,
         mobile: validatedData.mobile,
         email: validatedData.email,
-        password: hashedPassword
+        password: hashedPassword,
+        
+        // Chairman details
+        chairmanName: validatedData.chairmanName,
+        chairmanMobile: validatedData.chairmanMobile,
+        chairmanEmail: validatedData.chairmanEmail,
+        chairmanAadhar: validatedData.chairmanAadhar,
+        
+        // Secretary details
+        secretaryName: validatedData.secretaryName,
+        secretaryMobile: validatedData.secretaryMobile,
+        secretaryEmail: validatedData.secretaryEmail,
+        secretaryAadhar: validatedData.secretaryAadhar,
+        
+        // Treasurer details
+        treasurerName: validatedData.treasurerName,
+        treasurerMobile: validatedData.treasurerMobile,
+        treasurerEmail: validatedData.treasurerEmail,
+        treasurerAadhar: validatedData.treasurerAadhar
       } 
     });
     
@@ -186,12 +260,37 @@ const updateClub = asyncHandler(async (req, res) => {
       email: z.string().email("Valid email is required").max(255).optional(),
       password: z.string().min(6, "Password must be at least 6 characters").max(255).optional().or(z.literal('')),
       role: z.string().optional(),
+      
+      // Chairman details (optional for updates)
+      chairmanName: z.string().min(1).max(255).optional(),
+      chairmanMobile: z.string().min(1).max(20).optional(),
+      chairmanEmail: z.string().email("Valid chairman email is required").max(255).optional(),
+      chairmanAadhar: z.string().min(1).max(12).optional(),
+      
+      // Secretary details (optional for updates)
+      secretaryName: z.string().min(1).max(255).optional(),
+      secretaryMobile: z.string().min(1).max(20).optional(),
+      secretaryEmail: z.string().email("Valid secretary email is required").max(255).optional(),
+      secretaryAadhar: z.string().min(1).max(12).optional(),
+      
+      // Treasurer details (optional for updates)
+      treasurerName: z.string().min(1).max(255).optional(),
+      treasurerMobile: z.string().min(1).max(20).optional(),
+      treasurerEmail: z.string().email("Valid treasurer email is required").max(255).optional(),
+      treasurerAadhar: z.string().min(1).max(12).optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
       message: "At least one field is required",
     });
 
-  const validatedData = await schema.parseAsync(req.body);
+  // Preprocess data: convert empty strings to undefined for proper optional handling
+  const preprocessedData = {};
+  Object.keys(req.body).forEach(key => {
+    const value = req.body[key];
+    preprocessedData[key] = (typeof value === 'string' && value.trim() === '') ? undefined : value;
+  });
+
+  const validatedData = await schema.parseAsync(preprocessedData);
 
   const existing = await prisma.club.findUnique({ where: { id } });
   if (!existing) throw createError(404, "Club not found");

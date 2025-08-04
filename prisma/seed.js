@@ -32,6 +32,7 @@ async function main() {
   const sampleClub = await prisma.club.create({
     data: {
       clubName: 'Sample Business Club',
+      affiliationNumber: 'AFF12345',
       city: 'Delhi',
       address: '123 Business District, Delhi',
       mobile: '9876543210',
