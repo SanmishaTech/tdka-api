@@ -13,6 +13,8 @@ const groupRoutes = require("./routes/group");
 const competitionRoutes = require("./routes/competition");
 const playerRoutes = require("./routes/player");
 const playerClubRoutes = require("./routes/playerClub");
+const talukaRoutes = require("./routes/taluka");
+const regionRoutes = require("./routes/region");
 const authRoutes = require("./routes/auth");
 const swaggerRouter = require("./swagger");
 
@@ -96,7 +98,8 @@ app.use("/api/groups", groupRoutes);
 app.use("/api/competitions", competitionRoutes);
 app.use("/api/players", playerRoutes);
 app.use("/api/player-clubs", playerClubRoutes);
- 
+app.use("/api/talukas", talukaRoutes);
+app.use("/api/regions", regionRoutes);
 app.use(swaggerRouter);
 
 app.get("*", (req, res, next) => {

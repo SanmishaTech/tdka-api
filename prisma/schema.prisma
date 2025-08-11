@@ -68,6 +68,33 @@ model Group{
   @@map("groups")
 }
 
+model Taluka {
+  id               Int       @id @default(autoincrement())
+  number           Int       @unique // 2 digit number for that taluka
+  abbreviation     String    @unique // abbreviation of that taluka
+  talukaName       String    // taluka name
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  regions          Region[]  // One taluka can have many regions
+  
+  @@map("talukas")
+}
+
+model Region {
+  id               Int       @id @default(autoincrement())
+  number           Int       @unique // 2 digit number for that region
+  abbreviation     String    @unique // abbreviation of that region
+  regionName       String    // region name
+  talukaId         Int       // Foreign key to Taluka
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  taluka           Taluka    @relation(fields: [talukaId], references: [id], onDelete: Cascade)
+  
+  @@index([talukaId])
+  @@map("regions")
+}
+
 model Competition{
   id               Int       @id @default(autoincrement())
   competitionName  String
