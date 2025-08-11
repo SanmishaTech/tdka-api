@@ -208,6 +208,14 @@ const createPlayer = async (req, res, next) => {
       .refine((val) => /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
         message: "Last name can only contain letters.",
       }),
+    motherName: z
+      .string()
+      .max(100, "Mother name must not exceed 100 characters.")
+      .refine((val) => !val || /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
+        message: "Mother name can only contain letters.",
+      })
+      .optional()
+      .nullable(),
     dateOfBirth: z.string().refine(
       (val) => {
         const date = new Date(val);
@@ -302,6 +310,7 @@ const createPlayer = async (req, res, next) => {
       firstName: req.body.firstName,
       middleName: req.body.middleName || null,
       lastName: req.body.lastName,
+      motherName: req.body.motherName || null,
       dateOfBirth: new Date(req.body.dateOfBirth),
       position: req.body.position || null,
       address: req.body.address,
@@ -327,6 +336,7 @@ const createPlayer = async (req, res, next) => {
         firstName: req.body.firstName,
         middleName: req.body.middleName || null,
         lastName: req.body.lastName,
+        motherName: req.body.motherName || null,
         dateOfBirth: new Date(req.body.dateOfBirth),
         position: req.body.position || null,
         address: req.body.address,
@@ -391,6 +401,14 @@ const updatePlayer = async (req, res, next) => {
         message: "Last name can only contain letters.",
       })
       .optional(),
+    motherName: z
+      .string()
+      .max(100, "Mother name must not exceed 100 characters.")
+      .refine((val) => !val || /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
+        message: "Mother name can only contain letters.",
+      })
+      .optional()
+      .nullable(),
     dateOfBirth: z.string().refine(
       (val) => {
         const date = new Date(val);
@@ -499,6 +517,7 @@ const updatePlayer = async (req, res, next) => {
       firstName: req.body.firstName,
       middleName: req.body.middleName,
       lastName: req.body.lastName,
+      motherName: req.body.motherName,
       dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : undefined,
       position: req.body.position,
       address: req.body.address,

@@ -87,6 +87,7 @@ model Player {
   firstName        String
   middleName       String?
   lastName         String
+  motherName       String?
   dateOfBirth      DateTime
   position         String?
   address          String
