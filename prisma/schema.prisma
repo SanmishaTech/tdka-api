@@ -26,6 +26,8 @@ model Club {
   id               Int       @id @default(autoincrement())
   clubName         String
   affiliationNumber String
+  uniqueNumber     String    @unique  // TDKA/(region abbrev)/TDKA01 format
+  regionId         Int       // Foreign key to Region
   city             String
   address          String
   mobile          String
@@ -52,8 +54,11 @@ model Club {
   
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  region           Region    @relation(fields: [regionId], references: [id], onDelete: Restrict)
   competitions     Competition[]
   playerClubs      PlayerClub[]
+  
+  @@index([regionId])
 }
 
 model Group{
@@ -90,6 +95,7 @@ model Region {
   updatedAt        DateTime  @updatedAt
   
   taluka           Taluka    @relation(fields: [talukaId], references: [id], onDelete: Cascade)
+  clubs            Club[]    // One region can have many clubs
   
   @@index([talukaId])
   @@map("regions")

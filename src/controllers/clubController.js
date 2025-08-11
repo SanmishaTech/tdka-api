@@ -72,6 +72,8 @@ const getClubs = asyncHandler(async (req, res) => {
         id: true,
         clubName: true,
         affiliationNumber: true,
+        uniqueNumber: true,
+        regionId: true,
         city: true,
         address: true,
         mobile: true,
@@ -122,6 +124,8 @@ const getClub = asyncHandler(async (req, res) => {
       id: true,
       clubName: true,
       affiliationNumber: true,
+      uniqueNumber: true,
+      regionId: true,
       city: true,
       address: true,
       mobile: true,
@@ -158,6 +162,7 @@ const createClub = asyncHandler(async (req, res) => {
   const schema = z.object({
     clubName: z.string().min(1, "Club name is required").max(255),
     affiliationNumber: z.string().min(1, "Affiliation number is required").max(255),
+    regionId: z.number().int().min(1, "Please select a region"),
     city: z.string().min(1, "City is required").max(255),
     address: z.string().min(1, "Address is required").max(500),
     mobile: z.string().min(1, "Mobile number is required").max(20),
@@ -187,20 +192,35 @@ const createClub = asyncHandler(async (req, res) => {
   // Will throw Zod errors caught by asyncHandler
   const validatedData = await schema.parseAsync(req.body);
 
+  // Validate that the region exists
+  const region = await prisma.region.findUnique({
+    where: { id: validatedData.regionId },
+    include: { taluka: true }
+  });
+  
+  if (!region) {
+    throw createError(400, "Selected region does not exist");
+  }
+
   // Hash the password before saving
   const hashedPassword = await bcrypt.hash(validatedData.password, 10);
-  const dataWithHashedPassword = {
-    ...validatedData,
-    password: hashedPassword
-  };
 
   // Start a transaction to create both club and user
   const result = await prisma.$transaction(async (prisma) => {
+    // Generate unique club number
+    const clubCount = await prisma.club.count({
+      where: { regionId: validatedData.regionId }
+    });
+    const clubNumber = (clubCount + 1).toString().padStart(2, '0');
+    const uniqueNumber = `TDKA/${region.abbreviation}/TDKA${clubNumber}`;
+
     // Create the club
     const club = await prisma.club.create({
       data: {
         clubName: validatedData.clubName,
         affiliationNumber: validatedData.affiliationNumber,
+        uniqueNumber: uniqueNumber,
+        regionId: validatedData.regionId,
         city: validatedData.city,
         address: validatedData.address,
         mobile: validatedData.mobile,
@@ -369,10 +389,34 @@ const deleteClub = asyncHandler(async (req, res) => {
   res.json({ message: "Club deleted successfully" });
 });
 
+// Get regions for dropdown
+const getRegions = asyncHandler(async (req, res) => {
+  const regions = await prisma.region.findMany({
+    select: {
+      id: true,
+      regionName: true,
+      abbreviation: true,
+      number: true,
+      taluka: {
+        select: {
+          id: true,
+          talukaName: true,
+          abbreviation: true,
+          number: true
+        }
+      }
+    },
+    orderBy: [{ number: "asc" }]
+  });
+  
+  res.json(regions);
+});
+
 module.exports = {
   getClubs,
   createClub,
   getClub,
   updateClub,
   deleteClub,
+  getRegions,
 };

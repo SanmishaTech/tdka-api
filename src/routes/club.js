@@ -13,6 +13,20 @@ const router = express.Router();
 
 /**
  * @swagger
+ * /clubs/regions:
+ *   get:
+ *     summary: Get all regions for dropdown
+ *     tags: [Clubs]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of all regions with taluka info
+ */
+router.get("/regions", auth, clubController.getRegions);
+
+/**
+ * @swagger
  * /clubs:
  *   get:
  *     summary: Get all clubs
