@@ -3,6 +3,19 @@ const router = express.Router();
 const playerController = require("../controllers/playerController");
 const auth = require("../middleware/auth");
 const acl = require("../middleware/acl");
+const createUploadMiddleware = require("../middleware/uploadMiddleware");
+
+// Upload middleware configuration for player images
+const playerImageUpload = createUploadMiddleware(
+  "players", // module name
+  [
+    {
+      name: "profileImage",
+      allowedTypes: ["image/jpeg", "image/jpg", "image/png"],
+      maxSize: 2 * 1024 * 1024, // 2MB for passport size image
+    },
+  ]
+);
 
 /**
  * @swagger
@@ -221,9 +234,6 @@ router.get("/:id", auth, playerController.getPlayerById);
  *               profileImage:
  *                 type: string
  *                 format: binary
- *               aadharImage:
- *                 type: string
- *                 format: binary
  *               groupIds:
  *                 type: array
  *                 items:
@@ -249,7 +259,7 @@ router.get("/:id", auth, playerController.getPlayerById);
  *       403:
  *         description: Forbidden
  */
-router.post("/", auth, playerController.createPlayer);
+router.post("/", auth, ...playerImageUpload, playerController.createPlayer);
 
 /**
  * @swagger
@@ -295,9 +305,6 @@ router.post("/", auth, playerController.createPlayer);
  *               profileImage:
  *                 type: string
  *                 format: binary
- *               aadharImage:
- *                 type: string
- *                 format: binary
  *               groupIds:
  *                 type: array
  *                 items:
@@ -318,7 +325,7 @@ router.post("/", auth, playerController.createPlayer);
  *       404:
  *         description: Player not found
  */
-router.put("/:id", auth, playerController.updatePlayer);
+router.put("/:id", auth, ...playerImageUpload, playerController.updatePlayer);
 
 /**
  * @swagger

@@ -92,6 +92,7 @@ model Player {
   address          String
   mobile           String
   aadharNumber     String    @unique
+  profileImage     String?   // Path to profile image
   aadharVerified   Boolean   @default(false)
   isSuspended      Boolean   @default(false)
   createdAt        DateTime  @default(now())

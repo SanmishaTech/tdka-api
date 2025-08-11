@@ -1,5 +1,7 @@
 const createError = require("http-errors");
 const ExcelJS = require("exceljs");
+const fs = require("fs");
+const path = require("path");
 const prisma = require("../config/db");
 const validateRequest = require("../utils/validateRequest");
 const aclService = require("../services/aclService");
@@ -169,6 +171,19 @@ const getPlayerById = async (req, res, next) => {
 
 // Create a new player
 const createPlayer = async (req, res, next) => {
+  // Handle file upload validation first
+  if (req.uploadErrors && Object.keys(req.uploadErrors).length > 0) {
+    // Clean up uploaded files if there are validation errors
+    if (req.cleanupUpload) {
+      try {
+        await req.cleanupUpload(req);
+      } catch (cleanupErr) {
+        console.error("Cleanup error after upload validation:", cleanupErr);
+      }
+    }
+    return res.status(400).json({ errors: req.uploadErrors });
+  }
+
   // Define Zod schema for player creation
   const schema = z.object({
     firstName: z
@@ -270,6 +285,16 @@ const createPlayer = async (req, res, next) => {
   try {
     // Generate unique ID number
     const uniqueIdNumber = await generateUniqueIdNumber();
+    
+    // Process uploaded files
+    let profileImagePath = null;
+    
+    if (req.files) {
+      if (req.files.profileImage && req.files.profileImage[0]) {
+        profileImagePath = req.files.profileImage[0].path;
+      }
+      // Note: aadharImage is not stored in database, only used for verification
+    }
 
     // Create player and connect groups
     console.log("Creating player with data:", {
@@ -282,6 +307,7 @@ const createPlayer = async (req, res, next) => {
       address: req.body.address,
       mobile: req.body.mobile,
       aadharNumber: req.body.aadharNumber,
+      profileImage: profileImagePath,
       groupIds: req.body.groupIds
     });
     
@@ -306,6 +332,7 @@ const createPlayer = async (req, res, next) => {
         address: req.body.address,
         mobile: req.body.mobile,
         aadharNumber: req.body.aadharNumber,
+        profileImage: profileImagePath,
         groups: groupIds && groupIds.length > 0 ? {
           connect: groupIds.map(id => ({ id: parseInt(id) }))
         } : undefined
@@ -324,6 +351,19 @@ const createPlayer = async (req, res, next) => {
 // Update a player
 const updatePlayer = async (req, res, next) => {
   const playerId = parseInt(req.params.id);
+  
+  // Handle file upload validation first
+  if (req.uploadErrors && Object.keys(req.uploadErrors).length > 0) {
+    // Clean up uploaded files if there are validation errors
+    if (req.cleanupUpload) {
+      try {
+        await req.cleanupUpload(req);
+      } catch (cleanupErr) {
+        console.error("Cleanup error after upload validation:", cleanupErr);
+      }
+    }
+    return res.status(400).json({ errors: req.uploadErrors });
+  }
   
   // Define Zod schema for player update
   const schema = z.object({
@@ -438,6 +478,22 @@ const updatePlayer = async (req, res, next) => {
       });
     }
 
+    // Process uploaded files for update
+    let profileImagePath = existingPlayer.profileImage; // Keep existing image if no new one
+    
+    // Store old image path for cleanup
+    const oldImagePath = existingPlayer.profileImage;
+    
+    // Check if we should remove the profile image
+    if (req.body.removeImage === 'true' || req.body.removeProfileImage === 'true') {
+      profileImagePath = null;
+    } else if (req.files) {
+      if (req.files.profileImage && req.files.profileImage[0]) {
+        profileImagePath = req.files.profileImage[0].path;
+      }
+      // Note: aadharImage is not stored in database, only used for verification
+    }
+
     // Prepare update data
     const updateData = {
       firstName: req.body.firstName,
@@ -449,6 +505,7 @@ const updatePlayer = async (req, res, next) => {
       mobile: req.body.mobile,
       aadharNumber: req.body.aadharNumber,
       aadharVerified: req.body.aadharVerified,
+      profileImage: profileImagePath,
     };
 
     // Remove undefined values
@@ -485,6 +542,17 @@ const updatePlayer = async (req, res, next) => {
         groups: true,
       },
     });
+
+    // Clean up old image file if it was replaced or removed
+    if (oldImagePath && (profileImagePath !== oldImagePath)) {
+      try {
+        await fs.promises.unlink(oldImagePath);
+        console.log('Successfully deleted old profile image:', oldImagePath);
+      } catch (cleanupError) {
+        console.error('Error deleting old profile image:', cleanupError);
+        // Don't fail the request if cleanup fails
+      }
+    }
 
     res.json(player);
   } catch (error) {
