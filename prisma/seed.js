@@ -9,7 +9,6 @@ async function main() {
 
   // Clean up existing data - only tables that exist in schema
   await prisma.user.deleteMany();
-  await prisma.club.deleteMany();
 
   console.log('Creating admin user...');
 
@@ -27,21 +26,6 @@ async function main() {
   });
 
   console.log('Admin user created successfully with email:', adminUser.email);
-
-  // Create a sample club
-  const sampleClub = await prisma.club.create({
-    data: {
-      clubName: 'Sample Business Club',
-      affiliationNumber: 'AFF12345',
-      city: 'Delhi',
-      address: '123 Business District, Delhi',
-      mobile: '9876543210',
-      email: 'info@sampleclub.com',
-      password: await bcrypt.hash('club123', SALT_ROUNDS),
-    },
-  });
-
-  console.log('Sample club created:', sampleClub.clubName);
   console.log('Seeding completed successfully!');
 }
 
