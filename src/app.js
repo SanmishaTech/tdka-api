@@ -33,7 +33,7 @@ app.use(
 const allowedOriginsEnv = process.env.ALLOWED_ORIGINS;
 const allowedOrigins = allowedOriginsEnv
   ? allowedOriginsEnv.split(",")
-  : ["http://localhost:5173", "http://18.138.7.88"];
+  : ["http://localhost:5173", "https://tdka.3.7.237.251.sslip.io"];
 
 // Improved CORS configuration
 const corsOptions = {

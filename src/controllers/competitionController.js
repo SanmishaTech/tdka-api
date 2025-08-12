@@ -95,7 +95,8 @@ const getCompetitions = asyncHandler(async (req, res) => {
       id: comp.id,
       competitionName: comp.competitionName,
       maxPlayers: comp.maxPlayers,
-      date: comp.date,
+      fromDate: comp.fromDate,
+      toDate: comp.toDate,
       age: comp.age,
       lastEntryDate: comp.lastEntryDate,
       createdAt: comp.createdAt,
@@ -147,7 +148,8 @@ const getCompetition = asyncHandler(async (req, res) => {
     id: competition.id,
     competitionName: competition.competitionName,
     maxPlayers: competition.maxPlayers,
-    date: competition.date,
+    fromDate: competition.fromDate,
+    toDate: competition.toDate,
     age: competition.age,
     lastEntryDate: competition.lastEntryDate,
     createdAt: competition.createdAt,
@@ -163,7 +165,8 @@ const createCompetition = asyncHandler(async (req, res) => {
   const schema = z.object({
     competitionName: z.string().min(1, "Competition name is required").max(255),
     maxPlayers: z.number().min(1, "Max players must be at least 1").max(1000, "Max players cannot exceed 1000"),
-    date: z.string().min(1, "Date is required").max(255),
+    fromDate: z.string().min(1, "From date is required").max(255),
+    toDate: z.string().min(1, "To date is required").max(255),
     groups: z.array(z.string()).min(1, "At least one group must be selected"),
     clubs: z.array(z.string()).optional(),
     lastEntryDate: z.string().min(1, "Last entry date is required").max(255),
@@ -220,11 +223,12 @@ const updateCompetition = asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) throw createError(400, "Invalid competition ID");
 
-  const schema = z
+const schema = z
     .object({
       competitionName: z.string().min(1).max(255).optional(),
       maxPlayers: z.number().min(1, "Max players must be at least 1").max(1000, "Max players cannot exceed 1000").optional(),
-      date: z.string().min(1).max(255).optional(),
+      fromDate: z.string().min(1).max(255).optional(),
+      toDate: z.string().min(1).max(255).optional(),
       groups: z.array(z.string()).min(1, "At least one group must be selected").optional(),
       clubs: z.array(z.string()).optional(),
       lastEntryDate: z.string().min(1).max(255).optional(),

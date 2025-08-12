@@ -105,7 +105,8 @@ model Competition{
   id               Int       @id @default(autoincrement())
   competitionName  String
   maxPlayers       Int
-  date             String
+  fromDate         String
+  toDate           String
   age              String
   lastEntryDate    String
   createdAt        DateTime  @default(now())
