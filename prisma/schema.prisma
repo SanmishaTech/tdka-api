@@ -34,11 +34,11 @@ model Club {
   email            String
   password         String
   
-  // Chairman details
-  chairmanName     String?
-  chairmanMobile   String?
-  chairmanEmail    String?
-  chairmanAadhar   String?
+  // President details
+  presidentName     String?
+  presidentMobile   String?
+  presidentEmail    String?
+  presidentAadhar   String?
   
   // Secretary details
   secretaryName    String?

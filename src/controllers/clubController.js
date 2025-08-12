@@ -79,11 +79,11 @@ const getClubs = asyncHandler(async (req, res) => {
         mobile: true,
         email: true,
         
-        // Chairman details
-        chairmanName: true,
-        chairmanMobile: true,
-        chairmanEmail: true,
-        chairmanAadhar: true,
+        // President details
+        presidentName: true,
+        presidentMobile: true,
+        presidentEmail: true,
+        presidentAadhar: true,
         
         // Secretary details
         secretaryName: true,
@@ -131,11 +131,11 @@ const getClub = asyncHandler(async (req, res) => {
       mobile: true,
       email: true,
       
-      // Chairman details
-      chairmanName: true,
-      chairmanMobile: true,
-      chairmanEmail: true,
-      chairmanAadhar: true,
+      // President details
+      presidentName: true,
+      presidentMobile: true,
+      presidentEmail: true,
+      presidentAadhar: true,
       
       // Secretary details
       secretaryName: true,
@@ -170,11 +170,11 @@ const createClub = asyncHandler(async (req, res) => {
     password: z.string().min(6, "Password must be at least 6 characters").max(255),
     role: z.string().default("clubadmin"),
     
-    // Chairman details (optional for backward compatibility)
-    chairmanName: z.string().max(255).optional(),
-    chairmanMobile: z.string().max(20).optional(),
-    chairmanEmail: z.string().email("Valid chairman email is required").max(255).optional(),
-    chairmanAadhar: z.string().max(12).optional(),
+    // President details (optional for backward compatibility)
+    presidentName: z.string().max(255).optional(),
+    presidentMobile: z.string().max(20).optional(),
+    presidentEmail: z.string().email("Valid president email is required").max(255).optional(),
+    presidentAadhar: z.string().max(12).optional(),
     
     // Secretary details (optional for backward compatibility)
     secretaryName: z.string().max(255).optional(),
@@ -227,11 +227,11 @@ const createClub = asyncHandler(async (req, res) => {
         email: validatedData.email,
         password: hashedPassword,
         
-        // Chairman details
-        chairmanName: validatedData.chairmanName,
-        chairmanMobile: validatedData.chairmanMobile,
-        chairmanEmail: validatedData.chairmanEmail,
-        chairmanAadhar: validatedData.chairmanAadhar,
+        // President details
+        presidentName: validatedData.presidentName,
+        presidentMobile: validatedData.presidentMobile,
+        presidentEmail: validatedData.presidentEmail,
+        presidentAadhar: validatedData.presidentAadhar,
         
         // Secretary details
         secretaryName: validatedData.secretaryName,
@@ -281,11 +281,11 @@ const updateClub = asyncHandler(async (req, res) => {
       password: z.string().min(6, "Password must be at least 6 characters").max(255).optional().or(z.literal('')),
       role: z.string().optional(),
       
-      // Chairman details (optional for updates)
-      chairmanName: z.string().min(1).max(255).optional(),
-      chairmanMobile: z.string().min(1).max(20).optional(),
-      chairmanEmail: z.string().email("Valid chairman email is required").max(255).optional(),
-      chairmanAadhar: z.string().min(1).max(12).optional(),
+      // President details (optional for updates)
+      presidentName: z.string().min(1).max(255).optional(),
+      presidentMobile: z.string().min(1).max(20).optional(),
+      presidentEmail: z.string().email("Valid president email is required").max(255).optional(),
+      presidentAadhar: z.string().min(1).max(12).optional(),
       
       // Secretary details (optional for updates)
       secretaryName: z.string().min(1).max(255).optional(),
