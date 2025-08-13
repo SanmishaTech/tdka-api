@@ -49,14 +49,42 @@ const getCompetitions = asyncHandler(async (req, res) => {
   // Map frontend sort field "name" to database column "competitionName"
   const mappedSortBy = sortBy === "name" ? "competitionName" : sortBy;
 
-  const where = search
-    ? {
-        OR: [
-          { competitionName: { contains: search } },
-          { age: { contains: search } },
-        ],
+  const where = {};
+
+  // Filter by club based on user role
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      // Club admins can only see competitions their club is participating in
+      where.clubs = {
+        some: {
+          id: req.user.clubId
+        }
+      };
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        where.clubs = {
+          some: {
+            id: clubAdminUser.clubId
+          }
+        };
       }
-    : {};
+    }
+    // Super admins and other roles can see all competitions (no club filter)
+  }
+
+  if (search) {
+    where.OR = [
+      { competitionName: { contains: search } },
+      { age: { contains: search } },
+    ];
+  }
 
   const [competitions, total] = await Promise.all([
     prisma.competition.findMany({
@@ -121,8 +149,29 @@ const getCompetition = asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) throw createError(400, "Invalid competition ID");
 
+  // Build where clause with club filtering for club admins
+  const where = { id };
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
   const competition = await prisma.competition.findUnique({
-    where: { id },
+    where,
     include: {
       groups: {
         select: {
@@ -143,6 +192,14 @@ const getCompetition = asyncHandler(async (req, res) => {
   });
   
   if (!competition) throw createError(404, "Competition not found");
+
+  // Check if club admin has access to this competition
+  if (userClubId) {
+    const hasAccess = competition.clubs.some(club => club.id === userClubId);
+    if (!hasAccess) {
+      throw createError(403, "You don't have access to this competition");
+    }
+  }
 
   // Format the response for frontend compatibility
   const responseData = {
@@ -320,10 +377,213 @@ const deleteCompetition = asyncHandler(async (req, res) => {
   res.json({ message: "Competition deleted successfully" });
 });
 
+// Get available competitions that a club can join
+const getAvailableCompetitions = asyncHandler(async (req, res) => {
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!userClubId) {
+    return res.status(403).json({ errors: { message: "Access denied" } });
+  }
+
+  // Get competitions that the club is NOT already part of
+  const availableCompetitions = await prisma.competition.findMany({
+    where: {
+      NOT: {
+        clubs: {
+          some: {
+            id: userClubId
+          }
+        }
+      }
+    },
+    include: {
+      groups: {
+        select: {
+          id: true,
+          groupName: true,
+          gender: true,
+          age: true,
+        },
+      },
+      _count: {
+        select: {
+          clubs: true
+        }
+      }
+    },
+    orderBy: {
+      competitionName: 'asc'
+    }
+  });
+
+  res.json({
+    competitions: availableCompetitions,
+    totalCompetitions: availableCompetitions.length,
+  });
+});
+
+// Join a competition
+const joinCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!userClubId) {
+    return res.status(403).json({ errors: { message: "Access denied" } });
+  }
+
+  // Check if competition exists
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    include: {
+      clubs: true
+    }
+  });
+
+  if (!competition) throw createError(404, "Competition not found");
+
+  // Check if club is already part of this competition
+  const alreadyJoined = competition.clubs.some(club => club.id === userClubId);
+  if (alreadyJoined) {
+    throw createError(400, "Club is already part of this competition");
+  }
+
+  // Add club to competition
+  const updatedCompetition = await prisma.competition.update({
+    where: { id: competitionId },
+    data: {
+      clubs: {
+        connect: { id: userClubId }
+      }
+    },
+    include: {
+      clubs: {
+        select: {
+          id: true,
+          clubName: true,
+          city: true,
+        },
+      },
+    }
+  });
+
+  res.json({
+    message: "Successfully joined the competition",
+    competition: updatedCompetition
+  });
+});
+
+// Leave a competition
+const leaveCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!userClubId) {
+    return res.status(403).json({ errors: { message: "Access denied" } });
+  }
+
+  // Check if competition exists and club is part of it
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    include: {
+      clubs: true
+    }
+  });
+
+  if (!competition) throw createError(404, "Competition not found");
+
+  // Check if club is part of this competition
+  const isParticipating = competition.clubs.some(club => club.id === userClubId);
+  if (!isParticipating) {
+    throw createError(400, "Club is not part of this competition");
+  }
+
+  // Remove club from competition
+  const updatedCompetition = await prisma.competition.update({
+    where: { id: competitionId },
+    data: {
+      clubs: {
+        disconnect: { id: userClubId }
+      }
+    },
+    include: {
+      clubs: {
+        select: {
+          id: true,
+          clubName: true,
+          city: true,
+        },
+      },
+    }
+  });
+
+  res.json({
+    message: "Successfully left the competition",
+    competition: updatedCompetition
+  });
+});
+
 module.exports = {
   getCompetitions,
   createCompetition,
   getCompetition,
   updateCompetition,
   deleteCompetition,
+  getAvailableCompetitions,
+  joinCompetition,
+  leaveCompetition,
 };

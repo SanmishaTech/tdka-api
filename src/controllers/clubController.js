@@ -247,14 +247,15 @@ const createClub = asyncHandler(async (req, res) => {
       } 
     });
     
-    // Create a user with clubadmin role
+    // Create a user with clubadmin role and link to the club
     const user = await prisma.user.create({
       data: {
         name: validatedData.clubName, // Use club name as user name
         email: validatedData.email,
         password: hashedPassword,
         role: "clubadmin", // Set role as clubadmin
-        active: true
+        active: true,
+        clubId: club.id // Link the user to the club
       }
     });
     
@@ -337,8 +338,8 @@ const updateClub = asyncHandler(async (req, res) => {
     data: dataToUpdate,
   });
 
-  // If email is being updated, also update the corresponding user
-  if (validatedData.email) {
+  // If email, club name, or password is being updated, also update the corresponding user
+  if (validatedData.email || validatedData.clubName || validatedData.password) {
     try {
       const user = await prisma.user.findFirst({
         where: { 
@@ -348,9 +349,12 @@ const updateClub = asyncHandler(async (req, res) => {
       });
       
       if (user) {
-        const userUpdateData = {
-          email: validatedData.email
-        };
+        const userUpdateData = {};
+        
+        // If email is updated, update user email
+        if (validatedData.email) {
+          userUpdateData.email = validatedData.email;
+        }
         
         // If club name is updated, update user name too
         if (validatedData.clubName) {
@@ -361,6 +365,9 @@ const updateClub = asyncHandler(async (req, res) => {
         if (validatedData.password) {
           userUpdateData.password = dataToUpdate.password; // Already hashed
         }
+        
+        // Ensure the user is linked to the club
+        userUpdateData.clubId = id;
         
         await prisma.user.update({
           where: { id: user.id },

@@ -1,657 +1,572 @@
+const { PrismaClient } = require("@prisma/client");
+const asyncHandler = require("express-async-handler");
 const createError = require("http-errors");
 const ExcelJS = require("exceljs");
-const fs = require("fs");
-const path = require("path");
-const prisma = require("../config/db");
-const validateRequest = require("../utils/validateRequest");
-const aclService = require("../services/aclService");
-const { z } = require("zod");
 
-// Generate a unique ID number for players
-const generateUniqueIdNumber = async () => {
-  // Format: PLAYER-YYYYMMDD-XXXX where XXXX is a sequential number
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, "");
+const prisma = new PrismaClient();
+
+// Get all players with pagination and filtering
+const getPlayers = asyncHandler(async (req, res) => {
+  const {
+    page = 1,
+    limit = 10,
+    search = "",
+    isSuspended,
+    aadharVerified,
+    sortBy = "id",
+    sortOrder = "asc",
+    export: exportData = false,
+  } = req.query;
+
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+  const take = parseInt(limit);
+
+  // Build where clause
+  const where = {};
   
-  // Get the count of players created today to generate sequential number
-  const todayStart = new Date(today.setHours(0, 0, 0, 0));
-  const todayEnd = new Date(today.setHours(23, 59, 59, 999));
-  
-  const todayPlayersCount = await prisma.player.count({
-    where: {
-      createdAt: {
-        gte: todayStart,
-        lte: todayEnd
+  // Filter by club based on user role
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      // Club admins can only see players from their club
+      where.clubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        where.clubId = clubAdminUser.clubId;
       }
     }
-  });
+    // Super admins and other roles can see all players (no clubId filter)
+  }
   
-  // Format the sequential number with leading zeros
-  const sequentialNumber = String(todayPlayersCount + 1).padStart(4, '0');
-  return `PLAYER-${dateStr}-${sequentialNumber}`;
-};
-
-// Get all players with filtering, pagination, and optional export
-const getPlayers = async (req, res, next) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
-  const search = req.query.search || "";
-  const isSuspended = req.query.isSuspended === "true" ? true : 
-                     req.query.isSuspended === "false" ? false : undefined;
-  const aadharVerified = req.query.aadharVerified === "true" ? true : 
-                        req.query.aadharVerified === "false" ? false : undefined;
-  const sortBy = req.query.sortBy || "id";
-  const sortOrder = req.query.sortOrder === "desc" ? "desc" : "asc";
-  const exportToExcel = req.query.export === "true";
-
-  // Check if the user has the 'players.export' permission using ACL service
-  if (exportToExcel && !aclService.hasPermission(req.user, "players.export")) {
-    return res.status(403).json({
-      errors: { message: "You do not have permission to export players" },
-    });
+  if (search) {
+    where.OR = [
+      { firstName: { contains: search } },
+      { lastName: { contains: search } },
+      { uniqueIdNumber: { contains: search } },
+      { aadharNumber: { contains: search } },
+    ];
   }
 
-  const whereClause = {
-    AND: [
-      {
-        OR: [
-          { firstName: { contains: search } },
-          { lastName: { contains: search } },
-          { uniqueIdNumber: { contains: search } },
-          { aadharNumber: { contains: search } }
-        ],
-      },
-      isSuspended !== undefined ? { isSuspended } : {},
-      aadharVerified !== undefined ? { aadharVerified } : {},
-    ],
-  };
+  if (isSuspended !== undefined) {
+    where.isSuspended = isSuspended === "true";
+  }
 
-  try {
+  if (aadharVerified !== undefined) {
+    where.aadharVerified = aadharVerified === "true";
+  }
+
+  const orderBy = { [sortBy]: sortOrder };
+
+  if (exportData === "true") {
+    // Export all players to Excel
     const players = await prisma.player.findMany({
-      where: whereClause,
+      where,
       include: {
         groups: true,
+        club: true,
       },
-      skip: exportToExcel ? undefined : skip,
-      take: exportToExcel ? undefined : limit,
-      orderBy: { [sortBy]: sortOrder },
+      orderBy,
     });
 
-    if (exportToExcel) {
-      // Create a new workbook and worksheet
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet("Players");
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Players");
 
-      // Add headers
-      worksheet.columns = [
-        { header: "ID", key: "id", width: 10 },
-        { header: "Unique ID", key: "uniqueIdNumber", width: 20 },
-        { header: "First Name", key: "firstName", width: 20 },
-        { header: "Middle Name", key: "middleName", width: 20 },
-        { header: "Last Name", key: "lastName", width: 20 },
-        { header: "Date of Birth", key: "dateOfBirth", width: 15 },
-        { header: "Position", key: "position", width: 15 },
-        { header: "Address", key: "address", width: 30 },
-        { header: "Mobile", key: "mobile", width: 15 },
-        { header: "Aadhar Number", key: "aadharNumber", width: 20 },
-        { header: "Aadhar Verified", key: "aadharVerified", width: 15 },
-        { header: "Suspended", key: "isSuspended", width: 15 },
-        { header: "Groups", key: "groups", width: 30 },
-      ];
+    worksheet.columns = [
+      { header: "ID", key: "id", width: 10 },
+      { header: "Unique ID", key: "uniqueIdNumber", width: 15 },
+      { header: "First Name", key: "firstName", width: 15 },
+      { header: "Middle Name", key: "middleName", width: 15 },
+      { header: "Last Name", key: "lastName", width: 15 },
+      { header: "Date of Birth", key: "dateOfBirth", width: 15 },
+      { header: "Position", key: "position", width: 15 },
+      { header: "Address", key: "address", width: 30 },
+      { header: "Mobile", key: "mobile", width: 15 },
+      { header: "Aadhar Number", key: "aadharNumber", width: 15 },
+      { header: "Club", key: "club", width: 20 },
+      { header: "Aadhar Verified", key: "aadharVerified", width: 15 },
+      { header: "Suspended", key: "isSuspended", width: 15 },
+    ];
 
-      // Add rows
-      players.forEach((player) => {
-        worksheet.addRow({
-          id: player.id,
-          uniqueIdNumber: player.uniqueIdNumber,
-          firstName: player.firstName,
-          middleName: player.middleName || "",
-          lastName: player.lastName,
-          dateOfBirth: player.dateOfBirth.toISOString().split('T')[0],
-          position: player.position || "",
-          address: player.address,
-          mobile: player.mobile,
-          aadharNumber: player.aadharNumber,
-          aadharVerified: player.aadharVerified ? "Yes" : "No",
-          isSuspended: player.isSuspended ? "Yes" : "No",
-          groups: player.groups.map(g => g.groupName).join(", ")
-        });
+    players.forEach((player) => {
+      worksheet.addRow({
+        ...player,
+        club: player.club?.clubName || "No Club",
+        dateOfBirth: player.dateOfBirth.toISOString().split("T")[0],
       });
-
-      // Set response headers for file download
-      res.setHeader(
-        "Content-Type",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      );
-      res.setHeader("Content-Disposition", "attachment; filename=players.xlsx");
-
-      // Write the workbook to the response
-      await workbook.xlsx.write(res);
-      return res.end();
-    }
-
-    const totalPlayers = await prisma.player.count({
-      where: whereClause,
     });
-    const totalPages = Math.ceil(totalPlayers / limit);
 
-    res.json({
-      players,
-      page,
-      totalPages,
-      totalPlayers,
-    });
-  } catch (error) {
-    next(error);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", "attachment; filename=players.xlsx");
+
+    await workbook.xlsx.write(res);
+    res.end();
+    return;
   }
-};
 
-// Get a player by ID
-const getPlayerById = async (req, res, next) => {
-  try {
-    const player = await prisma.player.findUnique({
-      where: { id: parseInt(req.params.id) },
+  const [players, totalPlayers] = await Promise.all([
+    prisma.player.findMany({
+      where,
       include: {
         groups: true,
+        club: true,
       },
-    });
-    
-    if (!player) {
-      return res.status(404).json({
-        errors: { message: "Player not found." },
-      });
-    }
-    
-    res.json(player);
-  } catch (error) {
-    next(error);
-  }
-};
+      orderBy,
+      skip,
+      take,
+    }),
+    prisma.player.count({ where }),
+  ]);
 
-// Create a new player
-const createPlayer = async (req, res, next) => {
-  // Handle file upload validation first
-  if (req.uploadErrors && Object.keys(req.uploadErrors).length > 0) {
-    // Clean up uploaded files if there are validation errors
-    if (req.cleanupUpload) {
-      try {
-        await req.cleanupUpload(req);
-      } catch (cleanupErr) {
-        console.error("Cleanup error after upload validation:", cleanupErr);
-      }
-    }
-    return res.status(400).json({ errors: req.uploadErrors });
-  }
+  const totalPages = Math.ceil(totalPlayers / take);
 
-  // Define Zod schema for player creation
-  const schema = z.object({
-    firstName: z
-      .string()
-      .min(1, "First name cannot be left blank.")
-      .max(100, "First name must not exceed 100 characters.")
-      .refine((val) => /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
-        message: "First name can only contain letters.",
-      }),
-    middleName: z
-      .string()
-      .max(100, "Middle name must not exceed 100 characters.")
-      .refine((val) => !val || /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
-        message: "Middle name can only contain letters.",
-      })
-      .optional()
-      .nullable(),
-    lastName: z
-      .string()
-      .min(1, "Last name cannot be left blank.")
-      .max(100, "Last name must not exceed 100 characters.")
-      .refine((val) => /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
-        message: "Last name can only contain letters.",
-      }),
-    motherName: z
-      .string()
-      .max(100, "Mother name must not exceed 100 characters.")
-      .refine((val) => !val || /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
-        message: "Mother name can only contain letters.",
-      })
-      .optional()
-      .nullable(),
-    dateOfBirth: z.string().refine(
-      (val) => {
-        const date = new Date(val);
-        return !isNaN(date.getTime());
-      },
-      {
-        message: "Invalid date of birth.",
-      }
-    ),
-    position: z.string().optional().nullable(),
-    address: z.string().min(1, "Address cannot be left blank."),
-    mobile: z
-      .string()
-      .min(10, "Mobile number must be at least 10 digits.")
-      .max(15, "Mobile number must not exceed 15 digits.")
-      .refine((val) => /^[0-9]+$/.test(val), {
-        message: "Mobile number can only contain digits.",
-      })
-      .refine((val) => {
-        // Indian mobile numbers should start with 6, 7, 8, or 9 (not 0)
-        if (val.length === 10 && val.startsWith('0')) {
-          return false;
-        }
-        return true;
-      }, {
-        message: "Invalid mobile number format. Indian mobile numbers should not start with 0.",
-      }),
-    aadharNumber: z
-      .string()
-      .length(12, "Aadhar number must be exactly 12 digits.")
-      .refine((val) => /^\d+$/.test(val), {
-        message: "Aadhar number can only contain digits.",
-      })
-      .refine(
-        async (aadharNumber) => {
-          const existing = await prisma.player.findFirst({
-            where: { aadharNumber },
-          });
-          return !existing;
-        },
-        {
-          message: "A player with this Aadhar number already exists.",
-        }
-      ),
-    groupIds: z.union([
-      z.array(z.number()),
-      z.string().transform(val => {
-        try {
-          return JSON.parse(val);
-        } catch (e) {
-          return [];
-        }
-      })
-    ]).optional(),
+  res.json({
+    players,
+    page: parseInt(page),
+    totalPages,
+    totalPlayers,
   });
+});
 
-  // Validate the request body using Zod
-  console.log("Request body for player creation:", req.body);
-  try {
-    await schema.parseAsync(req.body);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      const errors = {};
-      error.errors.forEach((err) => {
-        errors[err.path[0]] = {
-          type: "validation",
-          message: err.message,
-        };
-      });
-      return res.status(400).json({ errors });
-    }
-    throw error;
-  }
-
-  try {
-    // Generate unique ID number
-    const uniqueIdNumber = await generateUniqueIdNumber();
-    
-    // Process uploaded files
-    let profileImagePath = null;
-    
-    if (req.files) {
-      if (req.files.profileImage && req.files.profileImage[0]) {
-        profileImagePath = req.files.profileImage[0].path;
-      }
-      // Note: aadharImage is not stored in database, only used for verification
-    }
-
-    // Create player and connect groups
-    console.log("Creating player with data:", {
-      uniqueIdNumber,
-      firstName: req.body.firstName,
-      middleName: req.body.middleName || null,
-      lastName: req.body.lastName,
-      motherName: req.body.motherName || null,
-      dateOfBirth: new Date(req.body.dateOfBirth),
-      position: req.body.position || null,
-      address: req.body.address,
-      mobile: req.body.mobile,
-      aadharNumber: req.body.aadharNumber,
-      profileImage: profileImagePath,
-      groupIds: req.body.groupIds
-    });
-    
-    // Parse groupIds if it's a string (JSON)
-    let groupIds = req.body.groupIds;
-    if (typeof groupIds === 'string') {
-      try {
-        groupIds = JSON.parse(groupIds);
-      } catch (e) {
-        console.error("Error parsing groupIds:", e);
-      }
-    }
-    
-    const player = await prisma.player.create({
-      data: {
-        uniqueIdNumber,
-        firstName: req.body.firstName,
-        middleName: req.body.middleName || null,
-        lastName: req.body.lastName,
-        motherName: req.body.motherName || null,
-        dateOfBirth: new Date(req.body.dateOfBirth),
-        position: req.body.position || null,
-        address: req.body.address,
-        mobile: req.body.mobile,
-        aadharNumber: req.body.aadharNumber,
-        profileImage: profileImagePath,
-        groups: groupIds && groupIds.length > 0 ? {
-          connect: groupIds.map(id => ({ id: parseInt(id) }))
-        } : undefined
-      },
-      include: {
-        groups: true,
-      },
-    });
-
-    res.status(201).json(player);
-  } catch (error) {
-    next(error);
-  }
-};
-
-// Update a player
-const updatePlayer = async (req, res, next) => {
+// Get player by ID
+const getPlayerById = asyncHandler(async (req, res) => {
   const playerId = parseInt(req.params.id);
-  
-  // Handle file upload validation first
-  if (req.uploadErrors && Object.keys(req.uploadErrors).length > 0) {
-    // Clean up uploaded files if there are validation errors
-    if (req.cleanupUpload) {
-      try {
-        await req.cleanupUpload(req);
-      } catch (cleanupErr) {
-        console.error("Cleanup error after upload validation:", cleanupErr);
-      }
-    }
-    return res.status(400).json({ errors: req.uploadErrors });
-  }
-  
-  // Define Zod schema for player update
-  const schema = z.object({
-    firstName: z
-      .string()
-      .min(1, "First name cannot be left blank.")
-      .max(100, "First name must not exceed 100 characters.")
-      .refine((val) => /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
-        message: "First name can only contain letters.",
-      })
-      .optional(),
-    middleName: z
-      .string()
-      .max(100, "Middle name must not exceed 100 characters.")
-      .refine((val) => !val || /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
-        message: "Middle name can only contain letters.",
-      })
-      .optional()
-      .nullable(),
-    lastName: z
-      .string()
-      .min(1, "Last name cannot be left blank.")
-      .max(100, "Last name must not exceed 100 characters.")
-      .refine((val) => /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
-        message: "Last name can only contain letters.",
-      })
-      .optional(),
-    motherName: z
-      .string()
-      .max(100, "Mother name must not exceed 100 characters.")
-      .refine((val) => !val || /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
-        message: "Mother name can only contain letters.",
-      })
-      .optional()
-      .nullable(),
-    dateOfBirth: z.string().refine(
-      (val) => {
-        const date = new Date(val);
-        return !isNaN(date.getTime());
-      },
-      {
-        message: "Invalid date of birth.",
-      }
-    ).optional(),
-    position: z.string().optional().nullable(),
-    address: z.string().min(1, "Address cannot be left blank.").optional(),
-    mobile: z
-      .string()
-      .min(10, "Mobile number must be at least 10 digits.")
-      .max(15, "Mobile number must not exceed 15 digits.")
-      .refine((val) => /^\d+$/.test(val), {
-        message: "Mobile number can only contain digits.",
-      })
-      .optional(),
-    aadharNumber: z
-      .string()
-      .length(12, "Aadhar number must be exactly 12 digits.")
-      .refine((val) => /^\d+$/.test(val), {
-        message: "Aadhar number can only contain digits.",
-      })
-      .optional()
-      .superRefine(async (aadharNumber, ctx) => {
-        if (aadharNumber) {
-          const existing = await prisma.player.findFirst({
-            where: { 
-              aadharNumber,
-              NOT: { id: playerId }
-            },
-          });
-          if (existing) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "A player with this Aadhar number already exists.",
-            });
-            return false;
+  if (!playerId) throw createError(400, "Invalid player ID");
+
+  const player = await prisma.player.findUnique({
+    where: { id: playerId },
+    include: {
+      groups: true,
+      club: {
+        include: {
+          region: {
+            include: {
+              taluka: true
+            }
           }
         }
-        return true;
-      }),
-    aadharVerified: z.boolean().optional(),
-    groupIds: z.union([
-      z.array(z.number()),
-      z.string().transform(val => {
-        try {
-          return JSON.parse(val);
-        } catch (e) {
-          return [];
+      }
+    },
+  });
+
+  if (!player) throw createError(404, "Player not found");
+
+  res.json(player);
+});
+
+// Create new player
+const createPlayer = asyncHandler(async (req, res) => {
+  const {
+    firstName,
+    middleName,
+    lastName,
+    motherName,
+    dateOfBirth,
+    position,
+    address,
+    mobile,
+    aadharNumber,
+    clubId,
+    groupIds,
+  } = req.body;
+
+  // Determine the clubId to use
+  let finalClubId = null;
+  
+  if (req.user) {
+    // If user is a club admin and has a clubId, use it
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      finalClubId = req.user.clubId;
+    }
+    // If user is a club (direct club login), find the associated user's clubId
+    else if (req.user.role === "CLUB") {
+      // Find the club admin user associated with this club
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
         }
-      })
-    ]).optional(),
-  });
-
-  // Validate the request body using Zod
-  try {
-    await schema.parseAsync(req.body);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      const errors = {};
-      error.errors.forEach((err) => {
-        errors[err.path[0]] = {
-          type: "validation",
-          message: err.message,
-        };
       });
-      return res.status(400).json({ errors });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        finalClubId = clubAdminUser.clubId;
+      }
     }
-    throw error;
+    // For other roles (like super admin), use the provided clubId
+    else if (clubId) {
+      finalClubId = parseInt(clubId);
+    }
+  } else if (clubId) {
+    // Fallback to provided clubId if no user context
+    finalClubId = parseInt(clubId);
   }
 
-  try {
-    // Get the existing player to check if it exists
-    const existingPlayer = await prisma.player.findUnique({
-      where: { id: playerId },
-      include: { groups: true }
+  // Generate unique ID number based on club
+  let uniqueIdNumber;
+  
+  if (finalClubId) {
+    // Get club details to extract the club number from uniqueNumber
+    const club = await prisma.club.findUnique({
+      where: { id: finalClubId },
+      select: { uniqueNumber: true }
     });
-
-    if (!existingPlayer) {
-      return res.status(404).json({
-        errors: { message: "Player not found." },
-      });
+    
+    if (!club) {
+      throw createError(400, "Club not found");
     }
+    
+    // Extract club number from club's uniqueNumber (e.g., "TDKA/SAD/TDKA01" -> "TDKA01")
+    const clubNumberMatch = club.uniqueNumber.match(/(TDKA\d+)$/);
+    const clubNumber = clubNumberMatch ? clubNumberMatch[1] : "TDKA00";
+    
+    // Count existing players for this club to generate sequential number
+    const clubPlayerCount = await prisma.player.count({
+      where: { clubId: finalClubId }
+    });
+    
+    const playerSequence = String(clubPlayerCount + 1).padStart(10, "0");
+    uniqueIdNumber = `TDKA/${clubNumber}/${playerSequence}`;
+  } else {
+    // Fallback for players without clubs
+    const totalPlayerCount = await prisma.player.count();
+    const playerSequence = String(totalPlayerCount + 1).padStart(10, "0");
+    uniqueIdNumber = `TDKA/TDKA00/${playerSequence}`;
+  }
 
-    // Process uploaded files for update
-    let profileImagePath = existingPlayer.profileImage; // Keep existing image if no new one
-    
-    // Store old image path for cleanup
-    const oldImagePath = existingPlayer.profileImage;
-    
-    // Check if we should remove the profile image
-    if (req.body.removeImage === 'true' || req.body.removeProfileImage === 'true') {
-      profileImagePath = null;
-    } else if (req.files) {
-      if (req.files.profileImage && req.files.profileImage[0]) {
-        profileImagePath = req.files.profileImage[0].path;
+  const playerData = {
+    uniqueIdNumber,
+    firstName,
+    middleName,
+    lastName,
+    motherName,
+    dateOfBirth: new Date(dateOfBirth),
+    position,
+    address,
+    mobile,
+    aadharNumber,
+    clubId: finalClubId,
+  };
+
+  if (req.files?.profileImage) {
+    playerData.profileImage = req.files.profileImage[0].path;
+  }
+
+  const player = await prisma.player.create({
+    data: {
+      ...playerData,
+      groups: groupIds
+        ? {
+            connect: JSON.parse(groupIds).map((id) => ({ id: parseInt(id) })),
+          }
+        : undefined,
+    },
+    include: {
+      groups: true,
+      club: true,
+    },
+  });
+
+  res.status(201).json(player);
+});
+
+// Update player
+const updatePlayer = asyncHandler(async (req, res) => {
+  const playerId = parseInt(req.params.id);
+  if (!playerId) throw createError(400, "Invalid player ID");
+
+  const {
+    firstName,
+    middleName,
+    lastName,
+    motherName,
+    dateOfBirth,
+    position,
+    address,
+    mobile,
+    aadharNumber,
+    aadharVerified,
+    clubId,
+    groupIds,
+  } = req.body;
+
+  // Determine the clubId to use for updates
+  let finalClubId = undefined; // Use undefined to not update if not specified
+  
+  if (clubId !== undefined) {
+    if (req.user) {
+      // If user is a club admin, they can only assign to their own club or remove (null)
+      if (req.user.role === "clubadmin" && req.user.clubId) {
+        if (clubId === null || clubId === "" || parseInt(clubId) === req.user.clubId) {
+          finalClubId = clubId ? parseInt(clubId) : null;
+        } else {
+          throw createError(403, "Club admins can only assign players to their own club");
+        }
       }
-      // Note: aadharImage is not stored in database, only used for verification
+      // If user is a club (direct club login), find the associated user's clubId
+      else if (req.user.role === "CLUB") {
+        const clubAdminUser = await prisma.user.findFirst({
+          where: {
+            email: req.user.email,
+            role: "clubadmin"
+          }
+        });
+        if (clubAdminUser && clubAdminUser.clubId) {
+          if (clubId === null || clubId === "" || parseInt(clubId) === clubAdminUser.clubId) {
+            finalClubId = clubId ? parseInt(clubId) : null;
+          } else {
+            throw createError(403, "Club admins can only assign players to their own club");
+          }
+        }
+      }
+      // For other roles (like super admin), use the provided clubId
+      else {
+        finalClubId = clubId ? parseInt(clubId) : null;
+      }
+    } else {
+      // Fallback to provided clubId if no user context
+      finalClubId = clubId ? parseInt(clubId) : null;
     }
+  }
 
-    // Prepare update data
-    const updateData = {
-      firstName: req.body.firstName,
-      middleName: req.body.middleName,
-      lastName: req.body.lastName,
-      motherName: req.body.motherName,
-      dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : undefined,
-      position: req.body.position,
-      address: req.body.address,
-      mobile: req.body.mobile,
-      aadharNumber: req.body.aadharNumber,
-      aadharVerified: req.body.aadharVerified,
-      profileImage: profileImagePath,
-    };
+  const updateData = {
+    firstName,
+    middleName,
+    lastName,
+    motherName,
+    dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+    position,
+    address,
+    mobile,
+    aadharNumber,
+    aadharVerified: aadharVerified !== undefined ? aadharVerified === "true" : undefined,
+    clubId: finalClubId,
+  };
 
-    // Remove undefined values
-    Object.keys(updateData).forEach(key => 
-      updateData[key] === undefined && delete updateData[key]
-    );
+  // Remove undefined values
+  Object.keys(updateData).forEach(
+    (key) => updateData[key] === undefined && delete updateData[key]
+  );
 
-    // Update player and connect/disconnect groups
-    console.log("Updating player with data:", {
+  if (req.files?.profileImage) {
+    updateData.profileImage = req.files.profileImage[0].path;
+  }
+
+  const player = await prisma.player.update({
+    where: { id: playerId },
+    data: {
       ...updateData,
-      groupIds: req.body.groupIds
-    });
-    
-    // Parse groupIds if it's a string (JSON)
-    let groupIds = req.body.groupIds;
-    if (typeof groupIds === 'string') {
-      try {
-        groupIds = JSON.parse(groupIds);
-      } catch (e) {
-        console.error("Error parsing groupIds:", e);
-      }
-    }
-    
-    const player = await prisma.player.update({
-      where: { id: playerId },
-      data: {
-        ...updateData,
-        groups: groupIds && groupIds.length > 0 ? {
-          set: [], // First disconnect all existing groups
-          connect: groupIds.map(id => ({ id: parseInt(id) })) // Then connect the new ones
-        } : undefined
-      },
-      include: {
-        groups: true,
-      },
-    });
-
-    // Clean up old image file if it was replaced or removed
-    if (oldImagePath && (profileImagePath !== oldImagePath)) {
-      try {
-        await fs.promises.unlink(oldImagePath);
-        console.log('Successfully deleted old profile image:', oldImagePath);
-      } catch (cleanupError) {
-        console.error('Error deleting old profile image:', cleanupError);
-        // Don't fail the request if cleanup fails
-      }
-    }
-
-    res.json(player);
-  } catch (error) {
-    next(error);
-  }
-};
-
-// Toggle player suspension status
-const toggleSuspension = async (req, res, next) => {
-  const schema = z.object({
-    isSuspended: z.boolean({
-      required_error: "Suspension status is required.",
-      invalid_type_error: "Suspension status must be a boolean.",
-    }),
+      groups: groupIds
+        ? {
+            set: JSON.parse(groupIds).map((id) => ({ id: parseInt(id) })),
+          }
+        : undefined,
+    },
+    include: {
+      groups: true,
+      club: true,
+    },
   });
 
-  // Validate the request body using Zod
-  const validationResult = await validateRequest(schema, req.body);
-  // Check if the result contains validation errors (objects with type and message properties)
-  if (validationResult && typeof validationResult === 'object' && 
-      Object.values(validationResult).some(val => val && typeof val === 'object' && val.type && val.message)) {
-    return res.status(400).json({ errors: validationResult });
-  }
+  res.json(player);
+});
 
-  try {
-    const updatedPlayer = await prisma.player.update({
-      where: { id: parseInt(req.params.id) },
-      data: { isSuspended: req.body.isSuspended },
-      include: {
-        groups: true,
-      },
-    });
-    
-    res.json(updatedPlayer);
-  } catch (error) {
-    if (error.code === "P2025") {
-      return res.status(404).json({
-        errors: { message: "Player not found" },
-      });
-    }
-    next(error);
-  }
-};
+// Toggle suspension status
+const toggleSuspension = asyncHandler(async (req, res) => {
+  const playerId = parseInt(req.params.id);
+  if (!playerId) throw createError(400, "Invalid player ID");
 
-// Toggle aadhar verification status
-const toggleAadharVerification = async (req, res, next) => {
-  const schema = z.object({
-    aadharVerified: z.boolean({
-      required_error: "Aadhar verification status is required.",
-      invalid_type_error: "Aadhar verification status must be a boolean.",
-    }),
+  const { isSuspended } = req.body;
+
+  const player = await prisma.player.update({
+    where: { id: playerId },
+    data: { isSuspended },
+    include: {
+      groups: true,
+      club: true,
+    },
   });
 
-  // Validate the request body using Zod
-  const validationResult = await validateRequest(schema, req.body);
-  // Check if the result contains validation errors (objects with type and message properties)
-  if (validationResult && typeof validationResult === 'object' && 
-      Object.values(validationResult).some(val => val && typeof val === 'object' && val.type && val.message)) {
-    return res.status(400).json({ errors: validationResult });
+  res.json(player);
+});
+
+// Toggle Aadhar verification status
+const toggleAadharVerification = asyncHandler(async (req, res) => {
+  const playerId = parseInt(req.params.id);
+  if (!playerId) throw createError(400, "Invalid player ID");
+
+  const { aadharVerified } = req.body;
+
+  const player = await prisma.player.update({
+    where: { id: playerId },
+    data: { aadharVerified },
+    include: {
+      groups: true,
+      club: true,
+    },
+  });
+
+  res.json(player);
+});
+
+// Get player's current club
+const getPlayerClub = asyncHandler(async (req, res) => {
+  const playerId = parseInt(req.params.playerId);
+  if (!playerId) throw createError(400, "Invalid player ID");
+
+  const player = await prisma.player.findUnique({
+    where: { id: playerId },
+    include: {
+      club: {
+        include: {
+          region: {
+            include: {
+              taluka: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!player) throw createError(404, "Player not found");
+
+  res.json({
+    player: {
+      id: player.id,
+      name: `${player.firstName} ${player.lastName}`,
+      club: player.club
+    }
+  });
+});
+
+// Get all players for a specific club
+const getClubPlayers = asyncHandler(async (req, res) => {
+  const clubId = parseInt(req.params.clubId);
+  if (!clubId) throw createError(400, "Invalid club ID");
+
+  const players = await prisma.player.findMany({
+    where: { clubId },
+    include: {
+      groups: true
+    },
+    orderBy: [
+      { firstName: 'asc' },
+      { lastName: 'asc' }
+    ]
+  });
+
+  res.json(players);
+});
+
+// Transfer player to a new club
+const transferPlayer = asyncHandler(async (req, res) => {
+  const { playerId, newClubId, transferReason } = req.body;
+
+  if (!playerId || !newClubId) {
+    throw createError(400, "Player ID and new club ID are required");
   }
 
-  try {
-    const updatedPlayer = await prisma.player.update({
-      where: { id: parseInt(req.params.id) },
-      data: { aadharVerified: req.body.aadharVerified },
-      include: {
-        groups: true,
-      },
-    });
-    
-    res.json(updatedPlayer);
-  } catch (error) {
-    if (error.code === "P2025") {
-      return res.status(404).json({
-        errors: { message: "Player not found" },
-      });
+  // Check if player exists
+  const player = await prisma.player.findUnique({
+    where: { id: playerId },
+    include: { club: true }
+  });
+
+  if (!player) throw createError(404, "Player not found");
+
+  // Check if new club exists
+  const newClub = await prisma.club.findUnique({
+    where: { id: newClubId }
+  });
+
+  if (!newClub) throw createError(404, "New club not found");
+
+  // Update player's club
+  const updatedPlayer = await prisma.player.update({
+    where: { id: playerId },
+    data: { clubId: newClubId },
+    include: {
+      club: true
     }
-    next(error);
-  }
-};
+  });
+
+  res.status(200).json({
+    message: "Player transfer completed successfully",
+    player: updatedPlayer,
+    previousClub: player.club,
+    newClub: newClub
+  });
+});
+
+// Remove player from club
+const removePlayerFromClub = asyncHandler(async (req, res) => {
+  const playerId = parseInt(req.params.playerId);
+  if (!playerId) throw createError(400, "Invalid player ID");
+
+  const player = await prisma.player.findUnique({
+    where: { id: playerId },
+    include: { club: true }
+  });
+
+  if (!player) throw createError(404, "Player not found");
+  if (!player.clubId) throw createError(400, "Player is not associated with any club");
+
+  const updatedPlayer = await prisma.player.update({
+    where: { id: playerId },
+    data: { clubId: null }
+  });
+
+  res.json({
+    message: "Player removed from club successfully",
+    player: updatedPlayer,
+    previousClub: player.club
+  });
+});
+
+// Get club statistics
+const getClubStats = asyncHandler(async (req, res) => {
+  const stats = await prisma.$transaction(async (tx) => {
+    const totalPlayers = await tx.player.count();
+    const playersWithClubs = await tx.player.count({
+      where: { clubId: { not: null } }
+    });
+    const playersWithoutClubs = totalPlayers - playersWithClubs;
+
+    const clubsWithPlayers = await tx.club.findMany({
+      include: {
+        _count: {
+          select: { players: true }
+        }
+      },
+      orderBy: {
+        players: {
+          _count: 'desc'
+        }
+      }
+    });
+
+    return {
+      totalPlayers,
+      playersWithClubs,
+      playersWithoutClubs,
+      totalClubs: clubsWithPlayers.length,
+      clubsWithPlayers: clubsWithPlayers.filter(club => club._count.players > 0).length,
+      topClubsByPlayerCount: clubsWithPlayers.slice(0, 5).map(club => ({
+        clubName: club.clubName,
+        playerCount: club._count.players
+      }))
+    };
+  });
+
+  res.json(stats);
+});
 
 module.exports = {
   getPlayers,
@@ -660,4 +575,9 @@ module.exports = {
   updatePlayer,
   toggleSuspension,
   toggleAadharVerification,
+  getPlayerClub,
+  getClubPlayers,
+  transferPlayer,
+  removePlayerFromClub,
+  getClubStats
 };

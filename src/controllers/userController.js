@@ -17,8 +17,8 @@ const getUsers = async (req, res, next) => {
     req.query.active === "true"
       ? true
       : req.query.active === "false"
-      ? false
-      : undefined;
+        ? false
+        : undefined;
   const sortBy = req.query.sortBy || "id";
   const sortOrder = req.query.sortOrder === "desc" ? "desc" : "asc";
   const exportToExcel = req.query.export === "true"; // Check if export is requested
@@ -49,6 +49,13 @@ const getUsers = async (req, res, next) => {
         role: true,
         active: true,
         lastLogin: true,
+        clubId: true,
+        club: {
+          select: {
+            id: true,
+            clubName: true,
+          },
+        },
       },
       where: whereClause,
       skip: exportToExcel ? undefined : skip, // Skip pagination if exporting to Excel
@@ -74,6 +81,7 @@ const getUsers = async (req, res, next) => {
         { header: "Email", key: "email", width: 30 },
         { header: "Role", key: "role", width: 15 },
         { header: "Active", key: "active", width: 10 },
+        { header: "Club", key: "club", width: 30 },
         { header: "Last Login", key: "lastLogin", width: 20 },
       ];
 
@@ -85,6 +93,7 @@ const getUsers = async (req, res, next) => {
           email: user.email,
           role: user.role,
           active: user.active ? "Yes" : "No",
+          club: user.club ? user.club.clubName : "No Club",
           lastLogin: user.lastLogin ? user.lastLogin.toISOString() : "N/A",
         });
       });
@@ -121,6 +130,15 @@ const getUserById = async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: parseInt(req.params.id) },
+      include: {
+        club: {
+          select: {
+            id: true,
+            clubName: true,
+            uniqueNumber: true,
+          },
+        },
+      },
     });
     if (!user) {
       return res.status(404).json({
@@ -167,6 +185,23 @@ const createUser = async (req, res, next) => {
       .nonempty("Password is required."),
     role: z.enum(Object.values(roles), "Invalid role."),
     active: z.boolean().optional(),
+    clubId: z
+      .number()
+      .int()
+      .positive("Club ID must be a positive integer.")
+      .optional()
+      .refine(
+        async (clubId) => {
+          if (!clubId) return true; // Allow null/undefined
+          const club = await prisma.club.findUnique({
+            where: { id: clubId },
+          });
+          return !!club;
+        },
+        {
+          message: "Club with the provided ID does not exist.",
+        }
+      ),
   });
 
   // Validate the request body using Zod
@@ -203,24 +238,45 @@ const updateUser = async (req, res, next) => {
         .optional(),
       role: z.enum(Object.values(roles), "Invalid role."),
       active: z.boolean().optional(),
+      clubId: z
+        .number()
+        .int()
+        .positive("Club ID must be a positive integer.")
+        .nullable()
+        .optional(),
     })
     .superRefine(async (data, ctx) => {
       const { id } = req.params; // Get the current user's ID from the URL params
 
       // Check if a user with the same email already exists, excluding the current user
-      const existingUser = await prisma.user.findUnique({
-        where: {
-          email: data.email,
-        },
-        select: { id: true }, // We only need the id to compare
-      });
-
-      // If an existing user is found and it's not the current user
-      if (existingUser && existingUser.id !== parseInt(id)) {
-        ctx.addIssue({
-          path: ["email"],
-          message: `User with email ${data.email} already exists.`,
+      if (data.email) {
+        const existingUser = await prisma.user.findUnique({
+          where: {
+            email: data.email,
+          },
+          select: { id: true }, // We only need the id to compare
         });
+
+        // If an existing user is found and it's not the current user
+        if (existingUser && existingUser.id !== parseInt(id)) {
+          ctx.addIssue({
+            path: ["email"],
+            message: `User with email ${data.email} already exists.`,
+          });
+        }
+      }
+
+      // Validate clubId if provided
+      if (data.clubId !== undefined && data.clubId !== null) {
+        const club = await prisma.club.findUnique({
+          where: { id: data.clubId },
+        });
+        if (!club) {
+          ctx.addIssue({
+            path: ["clubId"],
+            message: "Club with the provided ID does not exist.",
+          });
+        }
       }
     });
 

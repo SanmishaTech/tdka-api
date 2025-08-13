@@ -17,8 +17,13 @@ model User {
   lastLogin         DateTime?
   resetToken        String?
   resetTokenExpires DateTime?
+  clubId            Int?      // Foreign key to Club (nullable for admin users)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+  
+  club              Club?     @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  
+  @@index([clubId])
   @@map("users")
 }
 
@@ -56,7 +61,8 @@ model Club {
   updatedAt        DateTime  @updatedAt
   region           Region    @relation(fields: [regionId], references: [id], onDelete: Restrict)
   competitions     Competition[]
-  playerClubs      PlayerClub[]
+  players          Player[]  // One club can have many players
+  users            User[]    // One club can have many users
   
   @@index([regionId])
 }
@@ -131,32 +137,13 @@ model Player {
   profileImage     String?   // Path to profile image
   aadharVerified   Boolean   @default(false)
   isSuspended      Boolean   @default(false)
+  clubId           Int?      // Foreign key to Club (nullable for players without clubs)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   groups           Group[]
-  playerClubs      PlayerClub[]
+  club             Club?     @relation(fields: [clubId], references: [id], onDelete: SetNull)
 
+  @@index([clubId])
   @@map("players")
 }
 
-model PlayerClub {
-  id               Int       @id @default(autoincrement())
-  playerId         Int
-  clubId           Int
-  isActive         Boolean   @default(false)
-  joinedAt         DateTime  @default(now())
-  leftAt           DateTime?
-  transferReason   String?
-  approvedBy       String?   // Who approved this transfer
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  
-  player           Player    @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  club             Club      @relation(fields: [clubId], references: [id], onDelete: Cascade)
-  
-  // Ensure a player can only be active in one club at a time
-  @@unique([playerId, isActive], name: "unique_active_player")
-  @@index([playerId])
-  @@index([clubId])
-  @@index([isActive])
-}

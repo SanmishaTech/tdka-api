@@ -417,4 +417,11 @@ router.patch("/:id/suspension", auth, playerController.toggleSuspension);
  */
 router.patch("/:id/aadhar-verification", auth, playerController.toggleAadharVerification);
 
+// Club-related routes
+router.get("/:playerId/club", auth, playerController.getPlayerClub);
+router.get("/club/:clubId", auth, playerController.getClubPlayers);
+router.post("/transfer", auth, playerController.transferPlayer);
+router.delete("/:playerId/club", auth, playerController.removePlayerFromClub);
+router.get("/stats/clubs", auth, playerController.getClubStats);
+
 module.exports = router;

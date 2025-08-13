@@ -91,10 +91,12 @@ const login = async (req, res, next) => {
         role: true,
         active: true,
         lastLogin: true,
+        clubId: true,
       },
     });
 
     let isClub = false;
+    let clubId = null;
     
     // If not found in users, check clubs
     if (!user) {
@@ -118,9 +120,14 @@ const login = async (req, res, next) => {
           role: "CLUB",
           active: true,
           lastLogin: null,
+          clubId: club.id, // Set clubId to the club's own ID
         };
         isClub = true;
+        clubId = club.id;
       }
+    } else if (user.clubId) {
+      // If user has a clubId, store it
+      clubId = user.clubId;
     }
 
     if (!user) {
@@ -160,6 +167,7 @@ const login = async (req, res, next) => {
     res.json({
       token,
       user: userWithoutPassword,
+      clubId, // Include clubId in the response for frontend to store in localStorage
     });
   } catch (error) {
     next(error);
