@@ -109,6 +109,7 @@ model Competition{
   toDate           String
   age              String
   lastEntryDate    String
+  rules            String?   @db.Text  // Competition rules as rich text
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   groups           Group[]

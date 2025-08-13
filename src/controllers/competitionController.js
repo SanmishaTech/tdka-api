@@ -99,6 +99,7 @@ const getCompetitions = asyncHandler(async (req, res) => {
       toDate: comp.toDate,
       age: comp.age,
       lastEntryDate: comp.lastEntryDate,
+      rules: comp.rules,
       createdAt: comp.createdAt,
       updatedAt: comp.updatedAt,
       groups: groupIds,
@@ -152,6 +153,7 @@ const getCompetition = asyncHandler(async (req, res) => {
     toDate: competition.toDate,
     age: competition.age,
     lastEntryDate: competition.lastEntryDate,
+    rules: competition.rules,
     createdAt: competition.createdAt,
     updatedAt: competition.updatedAt,
     groups: competition.groups.map(group => group.id.toString()),
@@ -170,6 +172,7 @@ const createCompetition = asyncHandler(async (req, res) => {
     groups: z.array(z.string()).min(1, "At least one group must be selected"),
     clubs: z.array(z.string()).optional(),
     lastEntryDate: z.string().min(1, "Last entry date is required").max(255),
+    rules: z.string().optional(),
   });
 
   // Will throw Zod errors caught by asyncHandler
@@ -232,6 +235,7 @@ const schema = z
       groups: z.array(z.string()).min(1, "At least one group must be selected").optional(),
       clubs: z.array(z.string()).optional(),
       lastEntryDate: z.string().min(1).max(255).optional(),
+      rules: z.string().optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
       message: "At least one field is required",
