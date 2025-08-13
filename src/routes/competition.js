@@ -221,4 +221,13 @@ router.put("/:id", auth, competitionController.updateCompetition);
  */
 router.delete("/:id", auth, competitionController.deleteCompetition);
 
+// Club-specific competition routes
+router.get("/available", auth, competitionController.getAvailableCompetitions);
+router.post("/:id/join", auth, competitionController.joinCompetition);
+router.delete("/:id/leave", auth, competitionController.leaveCompetition);
+router.get("/:id/eligible-players", auth, competitionController.getEligiblePlayers);
+router.post("/:id/add-players", auth, competitionController.addPlayersToCompetition);
+router.get("/:id/registered-players", auth, competitionController.getRegisteredPlayers);
+router.delete("/:id/players/:playerId", auth, competitionController.removePlayerFromCompetition);
+
 module.exports = router;

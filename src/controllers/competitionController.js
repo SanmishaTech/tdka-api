@@ -213,8 +213,8 @@ const getCompetition = asyncHandler(async (req, res) => {
     rules: competition.rules,
     createdAt: competition.createdAt,
     updatedAt: competition.updatedAt,
-    groups: competition.groups.map(group => group.id.toString()),
-    clubs: competition.clubs.map(club => club.id.toString())
+    groups: competition.groups, // Return full group objects
+    clubs: competition.clubs     // Return full club objects
   };
 
   res.json(responseData);
@@ -577,6 +577,366 @@ const leaveCompetition = asyncHandler(async (req, res) => {
   });
 });
 
+// Get eligible players from club for a competition
+const getEligiblePlayers = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!userClubId) {
+    return res.status(403).json({ errors: { message: "Access denied" } });
+  }
+
+  // Check if competition exists and club has access
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    include: {
+      clubs: true
+    }
+  });
+
+  if (!competition) throw createError(404, "Competition not found");
+
+  // Check if club is part of this competition
+  const hasAccess = competition.clubs.some(club => club.id === userClubId);
+  if (!hasAccess) {
+    throw createError(403, "Your club is not part of this competition");
+  }
+
+  // Get all players from the club
+  const players = await prisma.player.findMany({
+    where: {
+      clubId: userClubId,
+      isSuspended: false // Only active players
+    },
+    select: {
+      id: true,
+      uniqueIdNumber: true,
+      firstName: true,
+      lastName: true,
+      dateOfBirth: true,
+      position: true,
+    },
+    orderBy: [
+      { firstName: 'asc' },
+      { lastName: 'asc' }
+    ]
+  });
+
+  res.json({
+    players,
+    totalPlayers: players.length,
+  });
+});
+
+// Add players to competition
+const addPlayersToCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  const { playerIds } = req.body;
+
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+  if (!playerIds || !Array.isArray(playerIds) || playerIds.length === 0) {
+    throw createError(400, "Player IDs are required");
+  }
+
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!userClubId) {
+    return res.status(403).json({ errors: { message: "Access denied" } });
+  }
+
+  // Check if competition exists and club has access
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    include: {
+      clubs: true
+    }
+  });
+
+  if (!competition) throw createError(404, "Competition not found");
+
+  // Check if club is part of this competition
+  const hasAccess = competition.clubs.some(club => club.id === userClubId);
+  if (!hasAccess) {
+    throw createError(403, "Your club is not part of this competition");
+  }
+
+  // Validate max players limit
+  if (playerIds.length > competition.maxPlayers) {
+    throw createError(400, `Maximum ${competition.maxPlayers} players allowed`);
+  }
+
+  // Verify all players belong to the club
+  const players = await prisma.player.findMany({
+    where: {
+      id: { in: playerIds.map(id => parseInt(id)) },
+      clubId: userClubId,
+      isSuspended: false
+    }
+  });
+
+  if (players.length !== playerIds.length) {
+    throw createError(400, "Some players are not valid or don't belong to your club");
+  }
+
+  // Create registration records for each player
+  const registrationData = players.map(player => ({
+    competitionId: competitionId,
+    playerId: player.id,
+    clubId: userClubId,
+    registeredBy: req.user.email,
+    status: 'registered'
+  }));
+
+  // Use transaction to ensure all registrations are created atomically
+  const registrations = await prisma.$transaction(async (tx) => {
+    // Check for existing registrations to avoid duplicates
+    const existingRegistrations = await tx.competitionRegistration.findMany({
+      where: {
+        competitionId: competitionId,
+        playerId: { in: playerIds.map(id => parseInt(id)) }
+      }
+    });
+
+    const existingPlayerIds = existingRegistrations.map(reg => reg.playerId);
+    const newRegistrations = registrationData.filter(reg => !existingPlayerIds.includes(reg.playerId));
+
+    if (newRegistrations.length === 0) {
+      throw createError(400, "All selected players are already registered for this competition");
+    }
+
+    // Create new registrations
+    await tx.competitionRegistration.createMany({
+      data: newRegistrations
+    });
+
+    // Fetch the created registrations with related data
+    return await tx.competitionRegistration.findMany({
+      where: {
+        competitionId: competitionId,
+        playerId: { in: newRegistrations.map(reg => reg.playerId) }
+      },
+      include: {
+        player: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            uniqueIdNumber: true
+          }
+        },
+        club: {
+          select: {
+            id: true,
+            clubName: true
+          }
+        },
+        competition: {
+          select: {
+            id: true,
+            competitionName: true
+          }
+        }
+      }
+    });
+  });
+
+  res.json({
+    message: `Successfully registered ${registrations.length} players for the competition`,
+    registrations: registrations.map(reg => ({
+      id: reg.id,
+      registrationDate: reg.registrationDate,
+      status: reg.status,
+      player: {
+        id: reg.player.id,
+        name: `${reg.player.firstName} ${reg.player.lastName}`,
+        uniqueIdNumber: reg.player.uniqueIdNumber
+      },
+      club: reg.club,
+      competition: reg.competition
+    }))
+  });
+});
+
+// Get registered players for a competition (for club admins)
+const getRegisteredPlayers = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!userClubId) {
+    return res.status(403).json({ errors: { message: "Access denied" } });
+  }
+
+  // Get registrations for this competition from the user's club
+  const registrations = await prisma.competitionRegistration.findMany({
+    where: {
+      competitionId: competitionId,
+      clubId: userClubId
+    },
+    include: {
+      player: {
+        select: {
+          id: true,
+          uniqueIdNumber: true,
+          firstName: true,
+          lastName: true,
+          dateOfBirth: true,
+          position: true,
+        }
+      },
+      competition: {
+        select: {
+          id: true,
+          competitionName: true,
+          maxPlayers: true
+        }
+      }
+    },
+    orderBy: {
+      registrationDate: 'desc'
+    }
+  });
+
+  res.json({
+    registrations: registrations.map(reg => ({
+      id: reg.id,
+      registrationDate: reg.registrationDate,
+      status: reg.status,
+      player: {
+        id: reg.player.id,
+        name: `${reg.player.firstName} ${reg.player.lastName}`,
+        uniqueIdNumber: reg.player.uniqueIdNumber,
+        position: reg.player.position,
+        age: new Date().getFullYear() - new Date(reg.player.dateOfBirth).getFullYear()
+      }
+    })),
+    totalRegistrations: registrations.length,
+    competition: registrations[0]?.competition || null
+  });
+});
+
+// Remove player from competition
+const removePlayerFromCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  const playerId = parseInt(req.params.playerId);
+
+  if (!competitionId || !playerId) {
+    throw createError(400, "Invalid competition ID or player ID");
+  }
+
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      // Direct club login - find the associated club admin user's clubId
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin"
+        }
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!userClubId) {
+    return res.status(403).json({ errors: { message: "Access denied" } });
+  }
+
+  // Find and delete the registration
+  const registration = await prisma.competitionRegistration.findFirst({
+    where: {
+      competitionId: competitionId,
+      playerId: playerId,
+      clubId: userClubId
+    },
+    include: {
+      player: {
+        select: {
+          firstName: true,
+          lastName: true,
+          uniqueIdNumber: true
+        }
+      }
+    }
+  });
+
+  if (!registration) {
+    throw createError(404, "Registration not found or you don't have permission to remove this player");
+  }
+
+  await prisma.competitionRegistration.delete({
+    where: { id: registration.id }
+  });
+
+  res.json({
+    message: `Successfully removed ${registration.player.firstName} ${registration.player.lastName} from the competition`,
+    player: {
+      id: playerId,
+      name: `${registration.player.firstName} ${registration.player.lastName}`,
+      uniqueIdNumber: registration.player.uniqueIdNumber
+    }
+  });
+});
+
 module.exports = {
   getCompetitions,
   createCompetition,
@@ -586,4 +946,8 @@ module.exports = {
   getAvailableCompetitions,
   joinCompetition,
   leaveCompetition,
+  getEligiblePlayers,
+  addPlayersToCompetition,
+  getRegisteredPlayers,
+  removePlayerFromCompetition,
 };

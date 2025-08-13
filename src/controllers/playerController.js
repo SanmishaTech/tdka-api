@@ -263,7 +263,15 @@ const createPlayer = asyncHandler(async (req, res) => {
       ...playerData,
       groups: groupIds
         ? {
-            connect: JSON.parse(groupIds).map((id) => ({ id: parseInt(id) })),
+            connect: (() => {
+              try {
+                const parsedGroupIds = Array.isArray(groupIds) ? groupIds : JSON.parse(groupIds);
+                return parsedGroupIds.map((id) => ({ id: parseInt(id) }));
+              } catch (error) {
+                console.error('Error parsing groupIds:', error);
+                throw createError(400, 'Invalid groupIds format');
+              }
+            })(),
           }
         : undefined,
     },
@@ -364,7 +372,15 @@ const updatePlayer = asyncHandler(async (req, res) => {
       ...updateData,
       groups: groupIds
         ? {
-            set: JSON.parse(groupIds).map((id) => ({ id: parseInt(id) })),
+            set: (() => {
+              try {
+                const parsedGroupIds = Array.isArray(groupIds) ? groupIds : JSON.parse(groupIds);
+                return parsedGroupIds.map((id) => ({ id: parseInt(id) }));
+              } catch (error) {
+                console.error('Error parsing groupIds:', error);
+                throw createError(400, 'Invalid groupIds format');
+              }
+            })(),
           }
         : undefined,
     },

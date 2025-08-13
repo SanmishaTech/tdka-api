@@ -63,6 +63,7 @@ model Club {
   competitions     Competition[]
   players          Player[]  // One club can have many players
   users            User[]    // One club can have many users
+  competitionRegistrations CompetitionRegistration[]
   
   @@index([regionId])
 }
@@ -120,6 +121,7 @@ model Competition{
   updatedAt        DateTime  @updatedAt
   groups           Group[]
   clubs            Club[]
+  registrations    CompetitionRegistration[]
 }
 
 model Player {
@@ -142,8 +144,31 @@ model Player {
   updatedAt        DateTime  @updatedAt
   groups           Group[]
   club             Club?     @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  competitionRegistrations CompetitionRegistration[]
 
   @@index([clubId])
   @@map("players")
+}
+
+model CompetitionRegistration {
+  id               Int       @id @default(autoincrement())
+  competitionId    Int       // Foreign key to Competition
+  playerId         Int       // Foreign key to Player
+  clubId           Int       // Foreign key to Club
+  registeredBy     String    // Email of the user who registered the player
+  status           String    @default("registered") // registered, confirmed, cancelled
+  registrationDate DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  competition      Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  player           Player      @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  club             Club        @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  
+  @@unique([competitionId, playerId]) // Prevent duplicate registrations
+  @@index([competitionId])
+  @@index([playerId])
+  @@index([clubId])
+  @@map("competition_registrations")
 }
 
