@@ -2,6 +2,9 @@ const { PrismaClient, Prisma } = require("@prisma/client");
 const prisma = new PrismaClient();
 const { z } = require("zod");
 const createError = require("http-errors");
+const PDFDocument = require("pdfkit");
+const fs = require("fs");
+const path = require("path");
 
 /**
  * Wrap async route handlers and funnel errors through Express error middleware.
@@ -105,7 +108,20 @@ const getCompetitions = asyncHandler(async (req, res) => {
           select: {
             id: true,
             clubName: true,
+            affiliationNumber: true,
             city: true,
+            mobile: true,
+            email: true,
+            region: {
+              select: {
+                regionName: true,
+                taluka: {
+                  select: {
+                    talukaName: true
+                  }
+                }
+              }
+            }
           },
         },
       },
@@ -186,7 +202,20 @@ const getCompetition = asyncHandler(async (req, res) => {
         select: {
           id: true,
           clubName: true,
+          affiliationNumber: true,
           city: true,
+          mobile: true,
+          email: true,
+          region: {
+            select: {
+              regionName: true,
+              taluka: {
+                select: {
+                  talukaName: true
+                }
+              }
+            }
+          }
         },
       },
     },
@@ -202,6 +231,23 @@ const getCompetition = asyncHandler(async (req, res) => {
     }
   }
 
+  // Get registered players count for each club in this competition
+  const clubsWithPlayerCount = await Promise.all(
+    competition.clubs.map(async (club) => {
+      const registeredPlayersCount = await prisma.competitionRegistration.count({
+        where: {
+          competitionId: id,
+          clubId: club.id
+        }
+      });
+
+      return {
+        ...club,
+        registeredPlayersCount
+      };
+    })
+  );
+
   // Format the response for frontend compatibility
   const responseData = {
     id: competition.id,
@@ -216,7 +262,7 @@ const getCompetition = asyncHandler(async (req, res) => {
     createdAt: competition.createdAt,
     updatedAt: competition.updatedAt,
     groups: competition.groups, // Return full group objects
-    clubs: competition.clubs     // Return full club objects
+    clubs: clubsWithPlayerCount  // Return clubs with player counts
   };
 
   res.json(responseData);
@@ -941,6 +987,447 @@ const removePlayerFromCompetition = asyncHandler(async (req, res) => {
   });
 });
 
+// Generate PDF for club details and players in a competition
+const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
+  console.log('PDF generation endpoint hit');
+  console.log('Params:', req.params);
+  console.log('User:', req.user);
+  
+  const competitionId = parseInt(req.params.id);
+  const clubId = parseInt(req.params.clubId);
+
+  console.log('Competition ID:', competitionId, 'Club ID:', clubId);
+
+  if (!competitionId || !clubId) {
+    console.error('Invalid IDs provided');
+    throw createError(400, "Invalid competition ID or club ID");
+  }
+
+  // Fetch competition details
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: {
+      id: true,
+      competitionName: true,
+      fromDate: true,
+      toDate: true,
+      age: true,
+      maxPlayers: true,
+      lastEntryDate: true
+    }
+  });
+
+  if (!competition) {
+    throw createError(404, "Competition not found");
+  }
+
+  // Fetch club details
+  const club = await prisma.club.findUnique({
+    where: { id: clubId },
+    include: {
+      region: {
+        include: {
+          taluka: true
+        }
+      }
+    }
+  });
+
+  if (!club) {
+    throw createError(404, "Club not found");
+  }
+
+  // Fetch registered players for this club in this competition
+  const registrations = await prisma.competitionRegistration.findMany({
+    where: {
+      competitionId: competitionId,
+      clubId: clubId
+    },
+    include: {
+      player: {
+        select: {
+          id: true,
+          uniqueIdNumber: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          dateOfBirth: true,
+          position: true,
+          mobile: true,
+          aadharNumber: true,
+          aadharVerified: true,
+          profileImage: true
+        }
+      }
+    },
+    orderBy: {
+      player: {
+        firstName: 'asc'
+      }
+    }
+  });
+
+  // Create PDF document with better margins
+  const doc = new PDFDocument({ 
+    margin: 40,
+    size: 'A4',
+    info: {
+      Title: `${club.clubName} - ${competition.competitionName} Registration Details`,
+      Author: 'TDKA Competition Management System',
+      Subject: 'Competition Registration Details',
+      Keywords: 'competition, registration, players, club'
+    }
+  });
+  
+  // Set response headers for inline viewing
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${club.clubName}_${competition.competitionName}_Details.pdf"`);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  
+  // Pipe PDF to response
+  doc.pipe(res);
+
+  // Helper function to format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      return dateString;
+    }
+  };
+
+  // Helper function to calculate age
+  const calculateAge = (dateOfBirth) => {
+    if (!dateOfBirth) return 'N/A';
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  // Colors
+  const primaryColor = '#2563eb';
+  const secondaryColor = '#64748b';
+  const lightGray = '#f1f5f9';
+  const darkGray = '#334155';
+
+  // Header with logo area and title
+  doc.rect(40, 40, doc.page.width - 80, 80).fill(primaryColor);
+  
+  // Title in header
+  doc.fontSize(24).font('Helvetica-Bold').fillColor('white')
+     .text('COMPETITION REGISTRATION DETAILS', 60, 70, { align: 'center' });
+  
+  // Reset position after header
+  doc.y = 140;
+  doc.fillColor('black');
+
+  // Competition Information Section
+  const sectionY = doc.y;
+  doc.rect(40, sectionY, doc.page.width - 80, 25).fill(lightGray);
+  doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
+     .text('🏆 COMPETITION INFORMATION', 50, sectionY + 8);
+  
+  doc.y = sectionY + 35;
+  doc.fillColor('black');
+  
+  // Competition details in a structured format
+  const leftCol = 60;
+  const rightCol = 320;
+  const lineHeight = 18;
+  
+  doc.fontSize(11).font('Helvetica-Bold').text('Competition Name:', leftCol, doc.y);
+  doc.font('Helvetica').text(competition.competitionName, leftCol + 120, doc.y);
+  doc.y += lineHeight;
+  
+  doc.font('Helvetica-Bold').text('Competition Period:', leftCol, doc.y);
+  doc.font('Helvetica').text(`${formatDate(competition.fromDate)} to ${formatDate(competition.toDate)}`, leftCol + 120, doc.y);
+  doc.y += lineHeight;
+  
+  doc.font('Helvetica-Bold').text('Age Category:', leftCol, doc.y);
+  doc.font('Helvetica').text(competition.age, leftCol + 120, doc.y);
+  
+  doc.font('Helvetica-Bold').text('Max Players:', rightCol, doc.y - lineHeight);
+  doc.font('Helvetica').text(competition.maxPlayers.toString(), rightCol + 80, doc.y - lineHeight);
+  
+  doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, doc.y);
+  doc.font('Helvetica').text(formatDate(competition.lastEntryDate), rightCol + 80, doc.y);
+  
+  doc.y += 25;
+
+  // Club Information Section
+  const clubSectionY = doc.y;
+  doc.rect(40, clubSectionY, doc.page.width - 80, 25).fill(lightGray);
+  doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
+     .text('🏛️ CLUB INFORMATION', 50, clubSectionY + 8);
+  
+  doc.y = clubSectionY + 35;
+  doc.fillColor('black');
+  
+  // Club details in structured format
+  doc.fontSize(11).font('Helvetica-Bold').text('Club Name:', leftCol, doc.y);
+  doc.font('Helvetica').text(club.clubName, leftCol + 120, doc.y);
+  doc.y += lineHeight;
+  
+  doc.font('Helvetica-Bold').text('Affiliation Number:', leftCol, doc.y);
+  doc.font('Helvetica').text(club.affiliationNumber, leftCol + 120, doc.y);
+  
+  doc.font('Helvetica-Bold').text('Contact:', rightCol, doc.y - lineHeight);
+  doc.font('Helvetica').text(club.mobile, rightCol + 60, doc.y - lineHeight);
+  
+  doc.font('Helvetica-Bold').text('Email:', rightCol, doc.y);
+  doc.font('Helvetica').text(club.email, rightCol + 60, doc.y);
+  doc.y += lineHeight;
+  
+  doc.font('Helvetica-Bold').text('Location:', leftCol, doc.y);
+  doc.font('Helvetica').text(`${club.city}, ${club.state}`, leftCol + 120, doc.y);
+  doc.y += lineHeight;
+  
+  if (club.address) {
+    doc.font('Helvetica-Bold').text('Address:', leftCol, doc.y);
+    doc.font('Helvetica').text(club.address, leftCol + 120, doc.y, { width: 300 });
+    doc.y += lineHeight;
+  }
+  
+  if (club.region) {
+    doc.font('Helvetica-Bold').text('Region:', leftCol, doc.y);
+    doc.font('Helvetica').text(club.region.regionName, leftCol + 120, doc.y);
+    if (club.region.taluka) {
+      doc.font('Helvetica-Bold').text('Taluka:', rightCol, doc.y);
+      doc.font('Helvetica').text(club.region.taluka.talukaName, rightCol + 60, doc.y);
+    }
+    doc.y += lineHeight;
+  }
+  
+  doc.y += 15;
+
+  // Players List Section
+  const playersSectionY = doc.y;
+  doc.rect(40, playersSectionY, doc.page.width - 80, 25).fill(lightGray);
+  doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
+     .text(`👥 REGISTERED PLAYERS (${registrations.length})`, 50, playersSectionY + 8);
+  
+  doc.y = playersSectionY + 35;
+  doc.fillColor('black');
+
+  if (registrations.length === 0) {
+    // Empty state with better styling
+    doc.rect(60, doc.y, doc.page.width - 120, 60).stroke('#e2e8f0');
+    doc.fontSize(12).font('Helvetica').fillColor(secondaryColor)
+       .text('No players registered for this competition yet.', 0, doc.y + 25, { align: 'center' });
+    doc.fillColor('black');
+  } else {
+    // Enhanced table with better styling
+    const tableStartY = doc.y;
+    const rowHeight = 30;
+    const headerHeight = 35;
+    let currentY = tableStartY;
+
+    // Table header background
+    doc.rect(50, currentY, 500, headerHeight).fill(primaryColor);
+    
+    // Table headers with better spacing
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('white');
+    const headers = [
+      { text: 'Sr.', x: 60, width: 30 },
+      { text: 'Player Name', x: 95, width: 130 },
+      { text: 'Unique ID', x: 230, width: 90 },
+      { text: 'Position', x: 325, width: 70 },
+      { text: 'Age', x: 400, width: 35 },
+      { text: 'Mobile', x: 440, width: 70 },
+      { text: 'Status', x: 515, width: 50 }
+    ];
+    
+    headers.forEach(header => {
+      doc.text(header.text, header.x, currentY + 12, { width: header.width, align: 'center' });
+    });
+
+    currentY += headerHeight;
+    doc.fillColor('black');
+
+    // Draw player rows with alternating colors
+    registrations.forEach((registration, index) => {
+      const player = registration.player;
+      const fullName = `${player.firstName} ${player.middleName ? player.middleName + ' ' : ''}${player.lastName}`;
+      
+      // Check if we need a new page
+      if (currentY > 720) {
+        doc.addPage();
+        currentY = 50;
+        
+        // Redraw header on new page
+        doc.rect(50, currentY, 500, headerHeight).fill(primaryColor);
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('white');
+        headers.forEach(header => {
+          doc.text(header.text, header.x, currentY + 12, { width: header.width, align: 'center' });
+        });
+        currentY += headerHeight;
+        doc.fillColor('black');
+      }
+
+      // Alternating row colors
+      if (index % 2 === 0) {
+        doc.rect(50, currentY, 500, rowHeight).fill('#f8fafc');
+      }
+
+      // Row data
+      doc.fontSize(9).font('Helvetica');
+      const rowData = [
+        { text: `${index + 1}`, x: 60, width: 30 },
+        { text: fullName, x: 95, width: 130 },
+        { text: player.uniqueIdNumber || 'N/A', x: 230, width: 90 },
+        { text: player.position || 'N/A', x: 325, width: 70 },
+        { text: calculateAge(player.dateOfBirth).toString(), x: 400, width: 35 },
+        { text: player.mobile || 'N/A', x: 440, width: 70 },
+        { text: player.aadharVerified ? '✓ Verified' : '⏳ Pending', x: 515, width: 50 }
+      ];
+      
+      rowData.forEach(data => {
+        const textColor = data.text.includes('✓') ? '#16a34a' : data.text.includes('⏳') ? '#ea580c' : 'black';
+        doc.fillColor(textColor).text(data.text, data.x, currentY + 10, { 
+          width: data.width, 
+          align: data.x === 60 || data.x === 400 ? 'center' : 'left',
+          ellipsis: true
+        });
+      });
+      
+      doc.fillColor('black');
+      currentY += rowHeight;
+    });
+
+    // Table border
+    doc.rect(50, tableStartY, 500, currentY - tableStartY).stroke('#e2e8f0');
+    
+    // Summary box
+    doc.y = currentY + 20;
+    doc.rect(50, doc.y, 200, 40).fill('#f0f9ff').stroke(primaryColor);
+    doc.fontSize(11).font('Helvetica-Bold').fillColor(primaryColor)
+       .text('SUMMARY', 60, doc.y + 8);
+    doc.fontSize(10).font('Helvetica').fillColor('black')
+       .text(`Total Players: ${registrations.length}`, 60, doc.y + 22);
+    
+    const verifiedCount = registrations.filter(reg => reg.player.aadharVerified).length;
+    doc.text(`Verified: ${verifiedCount}`, 150, doc.y + 22);
+  }
+
+  // Footer with better styling
+  const footerY = doc.page.height - 60;
+  doc.rect(40, footerY, doc.page.width - 80, 40).fill('#f8fafc').stroke('#e2e8f0');
+  
+  doc.fontSize(8).font('Helvetica').fillColor(secondaryColor);
+  doc.text('TDKA Competition Management System', 50, footerY + 8);
+  doc.text(`Generated on: ${new Date().toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })}`, 50, footerY + 20);
+  
+  // Add page number
+  doc.text(`Page 1`, doc.page.width - 100, footerY + 14, { align: 'right' });
+
+  // Finalize PDF
+  doc.end();
+});
+
+// Get registered players for a specific club in a specific competition
+const getClubPlayersInCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  const clubId = parseInt(req.params.clubId);
+
+  if (!competitionId || !clubId) {
+    throw createError(400, "Invalid competition ID or club ID");
+  }
+
+  // Check if competition exists
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: {
+      id: true,
+      competitionName: true,
+      maxPlayers: true
+    }
+  });
+
+  if (!competition) {
+    throw createError(404, "Competition not found");
+  }
+
+  // Check if club exists
+  const club = await prisma.club.findUnique({
+    where: { id: clubId },
+    select: {
+      id: true,
+      clubName: true
+    }
+  });
+
+  if (!club) {
+    throw createError(404, "Club not found");
+  }
+
+  // Get registrations for this club in this competition
+  const registrations = await prisma.competitionRegistration.findMany({
+    where: {
+      competitionId: competitionId,
+      clubId: clubId
+    },
+    include: {
+      player: {
+        select: {
+          id: true,
+          uniqueIdNumber: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          dateOfBirth: true,
+          position: true,
+          mobile: true,
+          aadharVerified: true
+        }
+      }
+    },
+    orderBy: {
+      registrationDate: 'desc'
+    }
+  });
+
+  // Format the response
+  const formattedRegistrations = registrations.map(reg => ({
+    id: reg.id,
+    registrationDate: reg.registrationDate,
+    status: reg.status,
+    player: {
+      id: reg.player.id,
+      name: `${reg.player.firstName} ${reg.player.middleName ? reg.player.middleName + ' ' : ''}${reg.player.lastName}`,
+      uniqueIdNumber: reg.player.uniqueIdNumber,
+      position: reg.player.position,
+      mobile: reg.player.mobile,
+      age: new Date().getFullYear() - new Date(reg.player.dateOfBirth).getFullYear(),
+      aadharVerified: reg.player.aadharVerified
+    }
+  }));
+
+  res.json({
+    registrations: formattedRegistrations,
+    totalRegistrations: formattedRegistrations.length,
+    competition: competition,
+    club: club
+  });
+});
+
 module.exports = {
   getCompetitions,
   createCompetition,
@@ -954,4 +1441,6 @@ module.exports = {
   addPlayersToCompetition,
   getRegisteredPlayers,
   removePlayerFromCompetition,
+  generateClubCompetitionPDF,
+  getClubPlayersInCompetition,
 };
