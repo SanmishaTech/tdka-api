@@ -258,30 +258,51 @@ const createPlayer = asyncHandler(async (req, res) => {
     playerData.profileImage = req.files.profileImage[0].path;
   }
 
-  const player = await prisma.player.create({
-    data: {
-      ...playerData,
-      groups: groupIds
-        ? {
-            connect: (() => {
-              try {
-                const parsedGroupIds = Array.isArray(groupIds) ? groupIds : JSON.parse(groupIds);
-                return parsedGroupIds.map((id) => ({ id: parseInt(id) }));
-              } catch (error) {
-                console.error('Error parsing groupIds:', error);
-                throw createError(400, 'Invalid groupIds format');
-              }
-            })(),
-          }
-        : undefined,
-    },
-    include: {
-      groups: true,
-      club: true,
-    },
-  });
+  try {
+    const player = await prisma.player.create({
+      data: {
+        ...playerData,
+        groups: groupIds
+          ? {
+              connect: (() => {
+                try {
+                  const parsedGroupIds = Array.isArray(groupIds) ? groupIds : JSON.parse(groupIds);
+                  return parsedGroupIds.map((id) => ({ id: parseInt(id) }));
+                } catch (error) {
+                  console.error('Error parsing groupIds:', error);
+                  throw createError(400, 'Invalid groupIds format');
+                }
+              })(),
+            }
+          : undefined,
+      },
+      include: {
+        groups: true,
+        club: true,
+      },
+    });
 
-  res.status(201).json(player);
+    res.status(201).json(player);
+  } catch (error) {
+    // Handle Prisma unique constraint errors
+    if (error.code === 'P2002') {
+      const field = error.meta?.target?.[0];
+      let message = 'A player with this information already exists.';
+      
+      if (field === 'aadharNumber') {
+        message = 'A player with this Aadhar number already exists. Please check the Aadhar number and try again.';
+      } else if (field === 'mobile') {
+        message = 'A player with this mobile number already exists. Please check the mobile number and try again.';
+      } else if (field === 'uniqueIdNumber') {
+        message = 'A player with this unique ID already exists. Please try again.';
+      }
+      
+      throw createError(409, message);
+    }
+    
+    // Re-throw other errors
+    throw error;
+  }
 });
 
 // Update player
@@ -366,31 +387,57 @@ const updatePlayer = asyncHandler(async (req, res) => {
     updateData.profileImage = req.files.profileImage[0].path;
   }
 
-  const player = await prisma.player.update({
-    where: { id: playerId },
-    data: {
-      ...updateData,
-      groups: groupIds
-        ? {
-            set: (() => {
-              try {
-                const parsedGroupIds = Array.isArray(groupIds) ? groupIds : JSON.parse(groupIds);
-                return parsedGroupIds.map((id) => ({ id: parseInt(id) }));
-              } catch (error) {
-                console.error('Error parsing groupIds:', error);
-                throw createError(400, 'Invalid groupIds format');
-              }
-            })(),
-          }
-        : undefined,
-    },
-    include: {
-      groups: true,
-      club: true,
-    },
-  });
+  try {
+    const player = await prisma.player.update({
+      where: { id: playerId },
+      data: {
+        ...updateData,
+        groups: groupIds
+          ? {
+              set: (() => {
+                try {
+                  const parsedGroupIds = Array.isArray(groupIds) ? groupIds : JSON.parse(groupIds);
+                  return parsedGroupIds.map((id) => ({ id: parseInt(id) }));
+                } catch (error) {
+                  console.error('Error parsing groupIds:', error);
+                  throw createError(400, 'Invalid groupIds format');
+                }
+              })(),
+            }
+          : undefined,
+      },
+      include: {
+        groups: true,
+        club: true,
+      },
+    });
 
-  res.json(player);
+    res.json(player);
+  } catch (error) {
+    // Handle Prisma unique constraint errors
+    if (error.code === 'P2002') {
+      const field = error.meta?.target?.[0];
+      let message = 'A player with this information already exists.';
+      
+      if (field === 'aadharNumber') {
+        message = 'A player with this Aadhar number already exists. Please check the Aadhar number and try again.';
+      } else if (field === 'mobile') {
+        message = 'A player with this mobile number already exists. Please check the mobile number and try again.';
+      } else if (field === 'uniqueIdNumber') {
+        message = 'A player with this unique ID already exists. Please try again.';
+      }
+      
+      throw createError(409, message);
+    }
+    
+    // Handle record not found errors
+    if (error.code === 'P2025') {
+      throw createError(404, 'Player not found');
+    }
+    
+    // Re-throw other errors
+    throw error;
+  }
 });
 
 // Toggle suspension status
