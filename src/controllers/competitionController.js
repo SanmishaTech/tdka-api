@@ -1198,23 +1198,32 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   const rightCol = 320;
   const lineHeight = 18;
   
-  doc.fontSize(11).font('Helvetica-Bold').text('Competition Name:', leftCol, doc.y);
-  doc.font('Helvetica').text(competition.competitionName, leftCol + 120, doc.y);
-  doc.y += lineHeight;
+  // Row: Competition Name
+  let currentY = doc.y;
+  doc.fontSize(11).font('Helvetica-Bold').text('Competition Name:', leftCol, currentY);
+  doc.font('Helvetica').text(competition.competitionName, leftCol + 120, currentY);
+  doc.y = currentY + lineHeight;
   
-  doc.font('Helvetica-Bold').text('Competition Period:', leftCol, doc.y);
-  doc.font('Helvetica').text(`${formatDate(competition.fromDate)} to ${formatDate(competition.toDate)}`, leftCol + 120, doc.y);
-  doc.y += lineHeight;
+  // Row: Competition Period
+  currentY = doc.y;
+  doc.font('Helvetica-Bold').text('Competition Period:', leftCol, currentY);
+  doc.font('Helvetica').text(`${formatDate(competition.fromDate)} to ${formatDate(competition.toDate)}`, leftCol + 120, currentY);
+  doc.y = currentY + lineHeight;
   
-  doc.font('Helvetica-Bold').text('Age Category:', leftCol, doc.y);
+  // Row: Age Category (left) and Max Players (right)
+  currentY = doc.y;
+  doc.font('Helvetica-Bold').text('Age Category:', leftCol, currentY);
   const pdfAgeLabel = computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age;
-  doc.font('Helvetica').text(pdfAgeLabel, leftCol + 120, doc.y);
+  doc.font('Helvetica').text(pdfAgeLabel, leftCol + 120, currentY);
   
-  doc.font('Helvetica-Bold').text('Max Players:', rightCol, doc.y - lineHeight);
-  doc.font('Helvetica').text(competition.maxPlayers.toString(), rightCol + 80, doc.y - lineHeight);
+  doc.font('Helvetica-Bold').text('Max Players:', rightCol, currentY);
+  doc.font('Helvetica').text(competition.maxPlayers.toString(), rightCol + 80, currentY);
+  doc.y = currentY + lineHeight;
   
-  doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, doc.y);
-  doc.font('Helvetica').text(formatDate(competition.lastEntryDate), rightCol + 80, doc.y);
+  // Row: Last Entry Date (full row on right column baseline)
+  currentY = doc.y;
+  doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, currentY);
+  doc.font('Helvetica').text(formatDate(competition.lastEntryDate), rightCol + 80, currentY);
   
   doc.y += 25;
 
@@ -1480,6 +1489,219 @@ const getClubPlayersInCompetition = asyncHandler(async (req, res) => {
   });
 });
 
+// Generate PDF listing all clubs participating in a competition
+const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) {
+    throw createError(400, "Invalid competition ID");
+  }
+
+  // Fetch competition with participating clubs
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: {
+      id: true,
+      competitionName: true,
+      fromDate: true,
+      toDate: true,
+      age: true,
+      ageEligibilityDate: true,
+      lastEntryDate: true,
+      clubs: {
+        select: {
+          id: true,
+          clubName: true,
+          affiliationNumber: true,
+          city: true,
+          region: { select: { regionName: true } },
+        },
+        orderBy: { clubName: 'asc' },
+      },
+    },
+  });
+
+  if (!competition) {
+    throw createError(404, "Competition not found");
+  }
+
+  // Authorization: clubadmin/CLUB must belong to a club in this competition
+  if (req.user) {
+    let userClubId = null;
+    if (req.user.role === 'clubadmin' && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === 'CLUB') {
+      const clubAdminUser = await prisma.user.findFirst({
+        where: { email: req.user.email, role: 'clubadmin' },
+        select: { clubId: true },
+      });
+      if (clubAdminUser?.clubId) userClubId = clubAdminUser.clubId;
+    }
+
+    if (userClubId) {
+      const allowed = competition.clubs.some((c) => c.id === userClubId);
+      if (!allowed) {
+        return res.status(403).json({ errors: { message: 'Access denied' } });
+      }
+    }
+  }
+
+  // Prepare PDF
+  const doc = new PDFDocument({
+    margin: 40,
+    size: 'A4',
+    info: {
+      Title: `${competition.competitionName} - Participating Clubs`,
+      Author: 'TDKA Competition Management System',
+      Subject: 'Participating Clubs List',
+    },
+  });
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${competition.competitionName}_Participating_Clubs.pdf"`);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  doc.pipe(res);
+
+  // Helpers
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric',
+      });
+    } catch (_) {
+      return dateString;
+    }
+  };
+
+  // Colors
+  const primaryColor = '#2563eb';
+  const secondaryColor = '#64748b';
+  const lightGray = '#f1f5f9';
+  const darkGray = '#334155';
+
+  // Header
+  doc.rect(40, 40, doc.page.width - 80, 80).fill(primaryColor);
+  doc.fontSize(22).font('Helvetica-Bold').fillColor('white')
+     .text('PARTICIPATING CLUBS', 60, 70, { align: 'center' });
+  doc.y = 140;
+  doc.fillColor('black');
+  
+  // Competition info
+  const leftCol = 60;
+  const rightCol = 320;
+  const lineHeight = 18;
+  doc.rect(40, doc.y, doc.page.width - 80, 25).fill(lightGray);
+  doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
+     .text(' COMPETITION INFORMATION', 50, doc.y + 8);
+  doc.y += 35;
+  doc.fillColor('black');
+  
+  // Row: Competition Name
+  let rowY = doc.y;
+  doc.fontSize(11).font('Helvetica-Bold').text('Competition Name:', leftCol, rowY);
+  doc.font('Helvetica').text(competition.competitionName, leftCol + 130, rowY);
+  doc.y = rowY + lineHeight;
+  
+  // Row: Competition Period
+  rowY = doc.y;
+  doc.font('Helvetica-Bold').text('Competition Period:', leftCol, rowY);
+  doc.font('Helvetica').text(`${formatDate(competition.fromDate)} to ${formatDate(competition.toDate)}`, leftCol + 130, rowY);
+  doc.y = rowY + lineHeight;
+  
+  // Row: Age Category (left) and Last Entry Date (right) on same line
+  rowY = doc.y;
+  doc.font('Helvetica-Bold').text('Age Category:', leftCol, rowY);
+  const pdfAgeLabel = computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age;
+  doc.font('Helvetica').text(pdfAgeLabel, leftCol + 130, rowY);
+  
+  doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, rowY);
+  doc.font('Helvetica').text(formatDate(competition.lastEntryDate), rightCol + 100, rowY);
+  doc.y = rowY + lineHeight;
+
+  doc.y += 25;
+
+  // Clubs table section header
+  doc.rect(40, doc.y, doc.page.width - 80, 25).fill(lightGray);
+  doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
+     .text(` PARTICIPATING CLUBS (${competition.clubs.length})`, 50, doc.y + 8);
+  doc.y += 35;
+  doc.fillColor('black');
+
+  // Table
+  const tableStartY = doc.y;
+  const headerHeight = 30;
+  const rowHeight = 24;
+  let currentY = tableStartY;
+
+  // Header background
+  doc.rect(50, currentY, 500, headerHeight).fill(primaryColor);
+  doc.fontSize(10).font('Helvetica-Bold').fillColor('white');
+  const headers = [
+    { text: 'Sr.', x: 60, width: 30 },
+    { text: 'Club Name', x: 95, width: 180 },
+    { text: 'Affiliation No.', x: 280, width: 100 },
+    { text: 'City', x: 385, width: 70 },
+    { text: 'Region', x: 460, width: 90 },
+  ];
+  headers.forEach(h => doc.text(h.text, h.x, currentY + 10, { width: h.width, align: 'center' }));
+  currentY += headerHeight;
+  doc.fillColor('black');
+
+  // Rows
+  const clubs = [...competition.clubs].sort((a,b) => a.clubName.localeCompare(b.clubName));
+  if (clubs.length === 0) {
+    doc.rect(60, currentY, doc.page.width - 120, 50).stroke('#e2e8f0');
+    doc.fontSize(12).font('Helvetica').fillColor(secondaryColor)
+       .text('No clubs have joined this competition yet.', 0, currentY + 18, { align: 'center' });
+    doc.fillColor('black');
+  } else {
+    clubs.forEach((club, index) => {
+      if (currentY > 720) {
+        doc.addPage();
+        currentY = 50;
+        // Redraw header
+        doc.rect(50, currentY, 500, headerHeight).fill(primaryColor);
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('white');
+        headers.forEach(h => doc.text(h.text, h.x, currentY + 10, { width: h.width, align: 'center' }));
+        currentY += headerHeight;
+        doc.fillColor('black');
+      }
+
+      if (index % 2 === 0) {
+        doc.rect(50, currentY, 500, rowHeight).fill('#f8fafc');
+      }
+
+      doc.fontSize(9).font('Helvetica').fillColor('black');
+      const row = [
+        { text: `${index + 1}`, x: 60, width: 30, align: 'center' },
+        { text: club.clubName || 'N/A', x: 95, width: 180 },
+        { text: club.affiliationNumber || 'N/A', x: 280, width: 100 },
+        { text: club.city || 'N/A', x: 385, width: 70 },
+        { text: club.region?.regionName || 'N/A', x: 460, width: 90 },
+      ];
+      row.forEach(col => {
+        doc.text(col.text, col.x, currentY + 8, { width: col.width, align: (col.align || 'left') });
+      });
+      currentY += rowHeight;
+    });
+
+    // Table border
+    doc.rect(50, tableStartY, 500, currentY - tableStartY).stroke('#e2e8f0');
+  }
+
+  // Footer
+  const footerY = doc.page.height - 60;
+  doc.rect(40, footerY, doc.page.width - 80, 40).fill('#f8fafc').stroke('#e2e8f0');
+  doc.fontSize(8).font('Helvetica').fillColor(secondaryColor);
+  doc.text('TDKA Competition Management System', 50, footerY + 8);
+  doc.text(`Generated on: ${new Date().toLocaleString('en-US', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' })}`, 50, footerY + 20);
+
+  doc.end();
+});
+
 module.exports = {
   getCompetitions,
   createCompetition,
@@ -1494,5 +1716,6 @@ module.exports = {
   getRegisteredPlayers,
   removePlayerFromCompetition,
   generateClubCompetitionPDF,
+  generateCompetitionClubsPDF,
   getClubPlayersInCompetition,
 };

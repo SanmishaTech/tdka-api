@@ -67,7 +67,9 @@ const router = express.Router();
  */
 router.get("/", auth, competitionController.getCompetitions);
 
-// PDF generation route - must be before /:id route
+// PDF generation routes - order matters: more specific first
+router.get("/:id/clubs/pdf", auth, competitionController.generateCompetitionClubsPDF);
+// Club-specific PDF for a single club in a competition
 router.get("/:id/clubs/:clubId/pdf", auth, competitionController.generateClubCompetitionPDF);
 
 // Get players for a specific club in a competition
