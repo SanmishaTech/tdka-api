@@ -103,6 +103,9 @@ const getCompetitions = asyncHandler(async (req, res) => {
           id: req.user.clubId
         }
       };
+    } else if (req.user.role === "observer") {
+      // Observers can only see the competition they are assigned to
+      where.observerId = req.user.id;
     } else if (req.user.role === "CLUB") {
       // Direct club login - find the associated club admin user's clubId
       const clubAdminUser = await prisma.user.findFirst({
@@ -265,6 +268,13 @@ const getCompetition = asyncHandler(async (req, res) => {
   });
   
   if (!competition) throw createError(404, "Competition not found");
+
+  // Observers may only access their assigned competition
+  if (req.user && req.user.role === 'observer') {
+    if (competition.observerId !== req.user.id) {
+      throw createError(403, "You don't have access to this competition");
+    }
+  }
 
   // Check if club admin has access to this competition
   if (userClubId) {
