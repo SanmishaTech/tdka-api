@@ -42,6 +42,45 @@ const asyncHandler = (fn) => (req, res, next) => {
   });
 };
 
+// Helper: parse common date formats safely (YYYY-MM-DD, DD/MM/YYYY, or Date)
+const parseEligibilityDate = (value) => {
+  if (!value) return null;
+  try {
+    if (value instanceof Date) return isNaN(value) ? null : value;
+    if (typeof value === 'string') {
+      const s = value.trim();
+      // ISO-like
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const d = new Date(s);
+        return isNaN(d) ? null : d;
+      }
+      // DD/MM/YYYY
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+        const [dd, mm, yyyy] = s.split('/').map((x) => parseInt(x, 10));
+        const d = new Date(yyyy, mm - 1, dd);
+        return isNaN(d) ? null : d;
+      }
+      // Fallback parse
+      const d = new Date(s);
+      return isNaN(d) ? null : d;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+};
+
+// Helper: compute "Under X" label from an eligibility date (DOB cutoff)
+const computeUnderAgeLabel = (eligibilityDate, asOf = new Date()) => {
+  const dob = parseEligibilityDate(eligibilityDate);
+  if (!dob) return null;
+  let age = asOf.getFullYear() - dob.getFullYear();
+  const m = asOf.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && asOf.getDate() < dob.getDate())) age--;
+  if (!Number.isFinite(age) || age < 0) return null;
+  return `Under ${age}`;
+};
+
 const getCompetitions = asyncHandler(async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.max(1, parseInt(req.query.limit) || 10);
@@ -134,6 +173,9 @@ const getCompetitions = asyncHandler(async (req, res) => {
     // Extract group IDs and club IDs for the frontend
     const groupIds = comp.groups.map(group => group.id.toString());
     const clubIds = comp.clubs.map(club => club.id.toString());
+
+    // Prefer computed label from eligibility date if available
+    const ageLabel = computeUnderAgeLabel(comp.ageEligibilityDate) || comp.age;
     
     return {
       id: comp.id,
@@ -141,7 +183,7 @@ const getCompetitions = asyncHandler(async (req, res) => {
       maxPlayers: comp.maxPlayers,
       fromDate: comp.fromDate,
       toDate: comp.toDate,
-      age: comp.age,
+      age: ageLabel,
       lastEntryDate: comp.lastEntryDate,
       ageEligibilityDate: comp.ageEligibilityDate,
       rules: comp.rules,
@@ -255,7 +297,7 @@ const getCompetition = asyncHandler(async (req, res) => {
     maxPlayers: competition.maxPlayers,
     fromDate: competition.fromDate,
     toDate: competition.toDate,
-    age: competition.age,
+    age: computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age,
     lastEntryDate: competition.lastEntryDate,
     ageEligibilityDate: competition.ageEligibilityDate,
     rules: competition.rules,
@@ -287,10 +329,10 @@ const createCompetition = asyncHandler(async (req, res) => {
   // Extract groups and clubs for separate handling
   const { groups, clubs, ...competitionData } = validatedData;
   
-  // For backward compatibility, store the first group's age as the competition age
-  let age = "Multiple groups";
+  // Prefer computing age label from eligibility date; fallback to first group's age
+  let age = computeUnderAgeLabel(competitionData.ageEligibilityDate) || "Multiple groups";
   
-  if (groups && groups.length > 0) {
+  if (!age && groups && groups.length > 0) {
     // Try to get the first group's details if possible
     try {
       const firstGroup = await prisma.group.findFirst({
@@ -362,6 +404,12 @@ const schema = z
   
   // Update data object for Prisma
   const updateData = { ...competitionData };
+
+  // If an eligibility date is provided, prefer computing the age label from it
+  const ageFromEligibility = computeUnderAgeLabel(competitionData.ageEligibilityDate);
+  if (ageFromEligibility) {
+    updateData.age = ageFromEligibility;
+  }
   
   // Update age and groups if provided
   if (groups && groups.length > 0) {
@@ -380,8 +428,10 @@ const schema = z
       console.error("Error fetching group details:", error);
     }
     
-    // Update age
-    updateData.age = age;
+    // Update age only if not already set from eligibility date
+    if (!updateData.age) {
+      updateData.age = age;
+    }
     
     // Update groups relationship
     updateData.groups = {
@@ -1012,6 +1062,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
       fromDate: true,
       toDate: true,
       age: true,
+      ageEligibilityDate: true,
       maxPlayers: true,
       lastEntryDate: true
     }
@@ -1156,7 +1207,8 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   doc.y += lineHeight;
   
   doc.font('Helvetica-Bold').text('Age Category:', leftCol, doc.y);
-  doc.font('Helvetica').text(competition.age, leftCol + 120, doc.y);
+  const pdfAgeLabel = computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age;
+  doc.font('Helvetica').text(pdfAgeLabel, leftCol + 120, doc.y);
   
   doc.font('Helvetica-Bold').text('Max Players:', rightCol, doc.y - lineHeight);
   doc.font('Helvetica').text(competition.maxPlayers.toString(), rightCol + 80, doc.y - lineHeight);
