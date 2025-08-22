@@ -22,6 +22,7 @@ model User {
   updatedAt         DateTime  @updatedAt
   
   club              Club?     @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  observedCompetitions Competition[] @relation("CompetitionObserver")
   
   @@index([clubId])
   @@map("users")
@@ -123,6 +124,10 @@ model Competition{
   groups           Group[]
   clubs            Club[]
   registrations    CompetitionRegistration[]
+  
+  // Observer assigned to this competition (only one observer per competition)
+  observerId       Int?
+  observer         User?     @relation("CompetitionObserver", fields: [observerId], references: [id], onDelete: SetNull)
 }
 
 model Player {

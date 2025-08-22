@@ -238,4 +238,11 @@ router.post("/:id/add-players", auth, competitionController.addPlayersToCompetit
 router.get("/:id/registered-players", auth, competitionController.getRegisteredPlayers);
 router.delete("/:id/players/:playerId", auth, competitionController.removePlayerFromCompetition);
 
+// Assign an observer to a competition (one per competition)
+router.post("/:id/observer", auth, competitionController.setObserverForCompetition);
+// Get current observer
+router.get("/:id/observer", auth, competitionController.getObserverForCompetition);
+// Update observer
+router.put("/:id/observer", auth, competitionController.updateObserverForCompetition);
+
 module.exports = router;

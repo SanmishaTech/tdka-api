@@ -5,6 +5,7 @@ const createError = require("http-errors");
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
+const bcrypt = require("bcryptjs");
 
 /**
  * Wrap async route handlers and funnel errors through Express error middleware.
@@ -1702,6 +1703,138 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
   doc.end();
 });
 
+// Create and assign an observer (one per competition)
+const setObserverForCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  // Only admins can set observers (frontend already restricts, but enforce on backend too)
+  if (!req.user || req.user.role !== 'admin') {
+    throw createError(403, "Access denied");
+  }
+
+  const schema = z.object({
+    email: z.string().email("Invalid email address"),
+    password: z.string().min(6, "Password must be at least 6 characters long"),
+  });
+
+  const { email, password } = await schema.parseAsync(req.body);
+
+  // Ensure competition exists and doesn't already have an observer
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: { id: true, competitionName: true, observerId: true }
+  });
+
+  if (!competition) throw createError(404, "Competition not found");
+  if (competition.observerId) {
+    throw createError(400, "An observer is already assigned to this competition");
+  }
+
+  // Ensure user with this email doesn't already exist (email is unique)
+  const existingUser = await prisma.user.findUnique({ where: { email } });
+  if (existingUser) {
+    throw createError(400, `User with email ${email} already exists`);
+  }
+
+  // Create observer user
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const observerName = `Observer - ${competition.competitionName}`;
+
+  const observer = await prisma.user.create({
+    data: {
+      name: observerName,
+      email,
+      password: hashedPassword,
+      role: 'observer',
+      active: true,
+    },
+    select: { id: true, name: true, email: true, role: true }
+  });
+
+  // Assign to competition
+  await prisma.competition.update({
+    where: { id: competitionId },
+    data: { observerId: observer.id }
+  });
+
+  res.status(201).json({
+    message: "Observer created and assigned successfully",
+    observer,
+    competition: { id: competition.id, competitionName: competition.competitionName }
+  });
+});
+
+// Get current observer for a competition
+const getObserverForCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  if (!req.user || req.user.role !== 'admin') {
+    throw createError(403, "Access denied");
+  }
+
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: {
+      id: true,
+      competitionName: true,
+      observer: { select: { id: true, name: true, email: true, role: true } },
+    },
+  });
+
+  if (!competition) throw createError(404, "Competition not found");
+  if (!competition.observer) throw createError(404, "No observer assigned");
+
+  res.json({ observer: competition.observer, competition: { id: competition.id, competitionName: competition.competitionName } });
+});
+
+// Update existing observer (email and/or password)
+const updateObserverForCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  if (!req.user || req.user.role !== 'admin') {
+    throw createError(403, "Access denied");
+  }
+
+  const schema = z.object({
+    email: z.string().email("Invalid email address").optional(),
+    password: z.string().min(6, "Password must be at least 6 characters long").optional(),
+  }).refine((data) => data.email || data.password, { message: 'At least one field (email or password) must be provided' });
+
+  const { email, password } = await schema.parseAsync(req.body);
+
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: { observerId: true },
+  });
+
+  if (!competition) throw createError(404, 'Competition not found');
+  if (!competition.observerId) throw createError(404, 'No observer assigned');
+
+  const updateData = {};
+  if (email) {
+    // Ensure the new email is not already used by another user
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing && existing.id !== competition.observerId) {
+      throw createError(400, `User with email ${email} already exists`);
+    }
+    updateData.email = email;
+  }
+  if (password) {
+    updateData.password = await bcrypt.hash(password, 10);
+  }
+
+  const updatedObserver = await prisma.user.update({
+    where: { id: competition.observerId },
+    data: updateData,
+    select: { id: true, name: true, email: true, role: true },
+  });
+
+  res.json({ message: 'Observer updated successfully', observer: updatedObserver });
+});
+
 module.exports = {
   getCompetitions,
   createCompetition,
@@ -1718,4 +1851,7 @@ module.exports = {
   generateClubCompetitionPDF,
   generateCompetitionClubsPDF,
   getClubPlayersInCompetition,
+  getObserverForCompetition,
+  updateObserverForCompetition,
+  setObserverForCompetition,
 };
