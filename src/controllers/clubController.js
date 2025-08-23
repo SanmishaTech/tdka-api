@@ -212,15 +212,15 @@ const createClub = asyncHandler(async (req, res) => {
     treasurerEmail: z.string().email("Valid treasurer email is required").max(255).optional(),
     treasurerAadhar: z.string().max(12).optional(),
     
-    // Coach details (optional)
-    coachName: z.string().max(255).optional(),
-    coachMobile: z.string().max(20).optional(),
+    // Coach details (name and mobile mandatory)
+    coachName: z.string().min(1, "Coach name is required").max(255),
+    coachMobile: z.string().min(1, "Coach mobile is required").max(20),
     coachEmail: z.string().email("Valid coach email is required").max(255).optional(),
     coachAadhar: z.string().max(12).optional(),
     
-    // Manager details (optional)
-    managerName: z.string().max(255).optional(),
-    managerMobile: z.string().max(20).optional(),
+    // Manager details (name and mobile mandatory)
+    managerName: z.string().min(1, "Manager name is required").max(255),
+    managerMobile: z.string().min(1, "Manager mobile is required").max(20),
     managerEmail: z.string().email("Valid manager email is required").max(255).optional(),
     managerAadhar: z.string().max(12).optional(),
   });
