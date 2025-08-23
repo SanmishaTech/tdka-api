@@ -3,4 +3,5 @@ module.exports = {
   CLUBADMIN: "clubadmin",
   MEMBER: "member",
   OBSERVER: "observer",
+  REFEREE: "referee",
 };

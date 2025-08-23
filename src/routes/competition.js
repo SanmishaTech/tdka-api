@@ -245,4 +245,11 @@ router.get("/:id/observer", auth, competitionController.getObserverForCompetitio
 // Update observer
 router.put("/:id/observer", auth, competitionController.updateObserverForCompetition);
 
+// Assign a referee to a competition (one per competition)
+router.post("/:id/referee", auth, competitionController.setRefereeForCompetition);
+// Get current referee
+router.get("/:id/referee", auth, competitionController.getRefereeForCompetition);
+// Update referee
+router.put("/:id/referee", auth, competitionController.updateRefereeForCompetition);
+
 module.exports = router;

@@ -1866,6 +1866,137 @@ const updateObserverForCompetition = asyncHandler(async (req, res) => {
   res.json({ message: 'Observer updated successfully', observer: updatedObserver });
 });
 
+// Create and assign a referee (one per competition)
+const setRefereeForCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  // Only admins can set referees
+  if (!req.user || req.user.role !== 'admin') {
+    throw createError(403, "Access denied");
+  }
+
+  const schema = z.object({
+    email: z.string().email("Invalid email address"),
+    password: z.string().min(6, "Password must be at least 6 characters long"),
+  });
+
+  const { email, password } = await schema.parseAsync(req.body);
+
+  // Ensure competition exists and doesn't already have a referee
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: { id: true, competitionName: true, refereeId: true }
+  });
+
+  if (!competition) throw createError(404, "Competition not found");
+  if (competition.refereeId) {
+    throw createError(400, "A referee is already assigned to this competition");
+  }
+
+  // Ensure user with this email doesn't already exist
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    throw createError(400, `User with email ${email} already exists`);
+  }
+
+  // Create referee user
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const refereeName = `Referee - ${competition.competitionName}`;
+
+  const referee = await prisma.user.create({
+    data: {
+      name: refereeName,
+      email,
+      password: hashedPassword,
+      role: 'referee',
+      active: true,
+    },
+    select: { id: true, name: true, email: true, role: true }
+  });
+
+  // Assign to competition
+  await prisma.competition.update({
+    where: { id: competitionId },
+    data: { refereeId: referee.id }
+  });
+
+  res.status(201).json({
+    message: "Referee created and assigned successfully",
+    referee,
+    competition: { id: competition.id, competitionName: competition.competitionName }
+  });
+});
+
+// Get current referee for a competition
+const getRefereeForCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  if (!req.user || req.user.role !== 'admin') {
+    throw createError(403, "Access denied");
+  }
+
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: {
+      id: true,
+      competitionName: true,
+      referee: { select: { id: true, name: true, email: true, role: true } },
+    },
+  });
+
+  if (!competition) throw createError(404, "Competition not found");
+  if (!competition.referee) throw createError(404, "No referee assigned");
+
+  res.json({ referee: competition.referee, competition: { id: competition.id, competitionName: competition.competitionName } });
+});
+
+// Update existing referee (email and/or password)
+const updateRefereeForCompetition = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  if (!competitionId) throw createError(400, "Invalid competition ID");
+
+  if (!req.user || req.user.role !== 'admin') {
+    throw createError(403, "Access denied");
+  }
+
+  const schema = z.object({
+    email: z.string().email("Invalid email address").optional(),
+    password: z.string().min(6, "Password must be at least 6 characters long").optional(),
+  }).refine((data) => data.email || data.password, { message: 'At least one field (email or password) must be provided' });
+
+  const { email, password } = await schema.parseAsync(req.body);
+
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: { refereeId: true },
+  });
+
+  if (!competition) throw createError(404, 'Competition not found');
+  if (!competition.refereeId) throw createError(404, 'No referee assigned');
+
+  const updateData = {};
+  if (email) {
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing && existing.id !== competition.refereeId) {
+      throw createError(400, `User with email ${email} already exists`);
+    }
+    updateData.email = email;
+  }
+  if (password) {
+    updateData.password = await bcrypt.hash(password, 10);
+  }
+
+  const updatedReferee = await prisma.user.update({
+    where: { id: competition.refereeId },
+    data: updateData,
+    select: { id: true, name: true, email: true, role: true },
+  });
+
+  res.json({ message: 'Referee updated successfully', referee: updatedReferee });
+});
+
 module.exports = {
   getCompetitions,
   createCompetition,
@@ -1885,4 +2016,8 @@ module.exports = {
   getObserverForCompetition,
   updateObserverForCompetition,
   setObserverForCompetition,
+  // Referee management
+  setRefereeForCompetition,
+  getRefereeForCompetition,
+  updateRefereeForCompetition,
 };

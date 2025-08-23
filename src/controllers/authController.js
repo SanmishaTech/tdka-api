@@ -199,6 +199,55 @@ const login = async (req, res, next) => {
       }
     }
 
+    // If the user is a referee, enforce login time window
+    if (typeof user.role === "string" && user.role.toLowerCase() === "referee") {
+      const competitions = await prisma.competition.findMany({
+        where: { refereeId: user.id },
+        select: { id: true, fromDate: true, toDate: true },
+      });
+
+      if (!competitions || competitions.length === 0) {
+        return res
+          .status(403)
+          .json({ errors: { message: "Referee is not assigned to any competition" } });
+      }
+
+      const now = new Date();
+
+      const ranges = competitions
+        .map((c) => {
+          const start = new Date(c.fromDate);
+          const end = new Date(c.toDate);
+          if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+          start.setHours(0, 0, 0, 0);
+          end.setHours(23, 59, 59, 999);
+          return { start, end, c };
+        })
+        .filter(Boolean);
+
+      if (ranges.length === 0) {
+        return res
+          .status(500)
+          .json({ errors: { message: "Invalid competition date configuration for referee access" } });
+      }
+
+      const anyActive = ranges.some(({ start, end }) => now >= start && now <= end);
+      if (!anyActive) {
+        const upcoming = ranges
+          .filter(({ start }) => start > now)
+          .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+        if (upcoming.length > 0) {
+          return res
+            .status(403)
+            .json({ errors: { message: `Referee access not yet active. Starts on ${upcoming[0].c.fromDate}` } });
+        }
+        return res
+          .status(403)
+          .json({ errors: { message: "Referee access period has expired" } });
+      }
+    }
+
     const token = jwt.sign({ userId: user.id, isClub }, jwtConfig.secret, {
       expiresIn: jwtConfig.expiresIn,
     });

@@ -23,6 +23,7 @@ model User {
   
   club              Club?     @relation(fields: [clubId], references: [id], onDelete: SetNull)
   observedCompetitions Competition[] @relation("CompetitionObserver")
+  refereedCompetitions Competition[] @relation("CompetitionReferee")
   
   @@index([clubId])
   @@map("users")
@@ -140,6 +141,10 @@ model Competition{
   // Observer assigned to this competition (only one observer per competition)
   observerId       Int?
   observer         User?     @relation("CompetitionObserver", fields: [observerId], references: [id], onDelete: SetNull)
+
+  // Referee assigned to this competition (only one referee per competition)
+  refereeId        Int?
+  referee          User?     @relation("CompetitionReferee", fields: [refereeId], references: [id], onDelete: SetNull)
 }
 
 model Player {
