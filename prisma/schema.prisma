@@ -58,6 +58,18 @@ model Club {
   treasurerEmail   String?
   treasurerAadhar  String?
   
+  // Coach details
+  coachName        String?
+  coachMobile      String?
+  coachEmail       String?
+  coachAadhar      String?
+  
+  // Manager details
+  managerName      String?
+  managerMobile    String?
+  managerEmail     String?
+  managerAadhar    String?
+  
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   region           Region    @relation(fields: [regionId], references: [id], onDelete: Restrict)

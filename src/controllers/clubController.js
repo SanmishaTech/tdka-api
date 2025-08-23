@@ -97,6 +97,18 @@ const getClubs = asyncHandler(async (req, res) => {
         treasurerEmail: true,
         treasurerAadhar: true,
         
+        // Coach details
+        coachName: true,
+        coachMobile: true,
+        coachEmail: true,
+        coachAadhar: true,
+        
+        // Manager details
+        managerName: true,
+        managerMobile: true,
+        managerEmail: true,
+        managerAadhar: true,
+        
         createdAt: true,
         updatedAt: true,
       },
@@ -149,6 +161,18 @@ const getClub = asyncHandler(async (req, res) => {
       treasurerEmail: true,
       treasurerAadhar: true,
       
+      // Coach details
+      coachName: true,
+      coachMobile: true,
+      coachEmail: true,
+      coachAadhar: true,
+      
+      // Manager details
+      managerName: true,
+      managerMobile: true,
+      managerEmail: true,
+      managerAadhar: true,
+      
       createdAt: true,
       updatedAt: true,
     },
@@ -187,10 +211,29 @@ const createClub = asyncHandler(async (req, res) => {
     treasurerMobile: z.string().max(20).optional(),
     treasurerEmail: z.string().email("Valid treasurer email is required").max(255).optional(),
     treasurerAadhar: z.string().max(12).optional(),
+    
+    // Coach details (optional)
+    coachName: z.string().max(255).optional(),
+    coachMobile: z.string().max(20).optional(),
+    coachEmail: z.string().email("Valid coach email is required").max(255).optional(),
+    coachAadhar: z.string().max(12).optional(),
+    
+    // Manager details (optional)
+    managerName: z.string().max(255).optional(),
+    managerMobile: z.string().max(20).optional(),
+    managerEmail: z.string().email("Valid manager email is required").max(255).optional(),
+    managerAadhar: z.string().max(12).optional(),
+  });
+
+  // Preprocess data: convert empty strings to undefined for proper optional handling
+  const preprocessedCreateData = {};
+  Object.keys(req.body || {}).forEach(key => {
+    const value = req.body[key];
+    preprocessedCreateData[key] = (typeof value === 'string' && value.trim() === '') ? undefined : value;
   });
 
   // Will throw Zod errors caught by asyncHandler
-  const validatedData = await schema.parseAsync(req.body);
+  const validatedData = await schema.parseAsync(preprocessedCreateData);
 
   // Validate that the region exists
   const region = await prisma.region.findUnique({
@@ -243,7 +286,19 @@ const createClub = asyncHandler(async (req, res) => {
         treasurerName: validatedData.treasurerName,
         treasurerMobile: validatedData.treasurerMobile,
         treasurerEmail: validatedData.treasurerEmail,
-        treasurerAadhar: validatedData.treasurerAadhar
+        treasurerAadhar: validatedData.treasurerAadhar,
+        
+        // Coach details
+        coachName: validatedData.coachName,
+        coachMobile: validatedData.coachMobile,
+        coachEmail: validatedData.coachEmail,
+        coachAadhar: validatedData.coachAadhar,
+        
+        // Manager details
+        managerName: validatedData.managerName,
+        managerMobile: validatedData.managerMobile,
+        managerEmail: validatedData.managerEmail,
+        managerAadhar: validatedData.managerAadhar
       } 
     });
     
@@ -299,6 +354,18 @@ const updateClub = asyncHandler(async (req, res) => {
       treasurerMobile: z.string().min(1).max(20).optional(),
       treasurerEmail: z.string().email("Valid treasurer email is required").max(255).optional(),
       treasurerAadhar: z.string().min(1).max(12).optional(),
+      
+      // Coach details (optional for updates)
+      coachName: z.string().min(1).max(255).optional(),
+      coachMobile: z.string().min(1).max(20).optional(),
+      coachEmail: z.string().email("Valid coach email is required").max(255).optional(),
+      coachAadhar: z.string().min(1).max(12).optional(),
+      
+      // Manager details (optional for updates)
+      managerName: z.string().min(1).max(255).optional(),
+      managerMobile: z.string().min(1).max(20).optional(),
+      managerEmail: z.string().email("Valid manager email is required").max(255).optional(),
+      managerAadhar: z.string().min(1).max(12).optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
       message: "At least one field is required",

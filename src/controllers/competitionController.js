@@ -324,7 +324,10 @@ const getCompetition = asyncHandler(async (req, res) => {
 const createCompetition = asyncHandler(async (req, res) => {
   const schema = z.object({
     competitionName: z.string().min(1, "Competition name is required").max(255),
-    maxPlayers: z.number().min(1, "Max players must be at least 1").max(1000, "Max players cannot exceed 1000"),
+    maxPlayers: z
+      .number()
+      .min(10, "Minimum 10 players")
+      .max(14, "Maximum 14 players"),
     fromDate: z.string().min(1, "From date is required").max(255),
     toDate: z.string().min(1, "To date is required").max(255),
     groups: z.array(z.string()).min(1, "At least one group must be selected"),
@@ -388,7 +391,11 @@ const updateCompetition = asyncHandler(async (req, res) => {
 const schema = z
     .object({
       competitionName: z.string().min(1).max(255).optional(),
-      maxPlayers: z.number().min(1, "Max players must be at least 1").max(1000, "Max players cannot exceed 1000").optional(),
+      maxPlayers: z
+        .number()
+        .min(10, "Minimum 10 players")
+        .max(14, "Maximum 14 players")
+        .optional(),
       fromDate: z.string().min(1).max(255).optional(),
       toDate: z.string().min(1).max(255).optional(),
       groups: z.array(z.string()).min(1, "At least one group must be selected").optional(),
@@ -849,6 +856,20 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
 
     if (newRegistrations.length === 0) {
       throw createError(400, "All selected players are already registered for this competition");
+    }
+
+    // Enforce max players when adding incrementally
+    const currentCount = await tx.competitionRegistration.count({
+      where: {
+        competitionId: competitionId,
+        clubId: userClubId,
+      },
+    });
+    if (currentCount + newRegistrations.length > competition.maxPlayers) {
+      const remaining = Math.max(0, competition.maxPlayers - currentCount);
+      throw createError(400, remaining === 0
+        ? `Maximum ${competition.maxPlayers} players already registered`
+        : `You can register only ${remaining} more player(s). Maximum ${competition.maxPlayers} allowed`);
     }
 
     // Create new registrations
