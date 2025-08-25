@@ -26,28 +26,15 @@ app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
     contentSecurityPolicy:
-      process.env.NODE_ENV === "production" ? undefined : false,
+      process.env.NODE_ENV === "production" ? undefined : false
   })
 );
 
-const allowedOriginsEnv = process.env.ALLOWED_ORIGINS;
-const allowedOrigins = allowedOriginsEnv
-  ? allowedOriginsEnv.split(",")
-  : ["http://localhost:5173", "https://tdka.3.7.237.251.sslip.io"];
-
-// Improved CORS configuration
+// CORS configuration: allow all origins (reflects request origin) and support credentials
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, Postman, etc.)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`CORS blocked request from origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  // Using 'true' reflects the request Origin header, effectively allowing any origin
+  // while remaining compatible with credentials.
+  origin: true,
   credentials: true, // Allow cookies and auth headers
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: [
@@ -62,6 +49,8 @@ const corsOptions = {
   maxAge: 86400 // Cache preflight for 24 hours
 };
 app.use(cors(corsOptions));
+// Explicitly handle preflight for all routes
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -69,8 +58,8 @@ app.use(express.urlencoded({ extended: true }));
 const frontendDistPath =
   process.env.NODE_ENV === "production"
     ? process.env.FRONTEND_PATH ||
-      path.resolve(__dirname, "..", "..", "CrediSphere", "dist")
-    : path.resolve(__dirname, "..", "..", "CrediSphere_api", "dist");
+      path.resolve(__dirname, "..", "..", "tdka", "dist")
+    : path.resolve(__dirname, "..", "..", "tdka_api", "dist");
 console.log(frontendDistPath);
 console.log(`Frontend build path: ${frontendDistPath}`);
 

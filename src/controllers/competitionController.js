@@ -1220,7 +1220,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   const sectionY = doc.y;
   doc.rect(40, sectionY, doc.page.width - 80, 25).fill(lightGray);
   doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
-     .text('🏆 COMPETITION INFORMATION', 50, sectionY + 8);
+     .text('COMPETITION INFORMATION', 50, sectionY + 8);
   
   doc.y = sectionY + 35;
   doc.fillColor('black');
@@ -1242,11 +1242,11 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   doc.font('Helvetica').text(`${formatDate(competition.fromDate)} to ${formatDate(competition.toDate)}`, leftCol + 120, currentY);
   doc.y = currentY + lineHeight;
   
-  // Row: Age Category (left) and Max Players (right)
+  // Row: Eligibility Date (left) and Max Players (right)
   currentY = doc.y;
-  doc.font('Helvetica-Bold').text('Age Category:', leftCol, currentY);
-  const pdfAgeLabel = computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age;
-  doc.font('Helvetica').text(pdfAgeLabel, leftCol + 120, currentY);
+  doc.font('Helvetica-Bold').text('Eligibility Date:', leftCol, currentY);
+  const eligibility = formatDate(competition.ageEligibilityDate);
+  doc.font('Helvetica').text(eligibility, leftCol + 120, currentY);
   
   doc.font('Helvetica-Bold').text('Max Players:', rightCol, currentY);
   doc.font('Helvetica').text(competition.maxPlayers.toString(), rightCol + 80, currentY);
@@ -1254,8 +1254,8 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   
   // Row: Last Entry Date (full row on right column baseline)
   currentY = doc.y;
-  doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, currentY);
-  doc.font('Helvetica').text(formatDate(competition.lastEntryDate), rightCol + 80, currentY);
+  doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, currentY, { width: 100 });
+  doc.font('Helvetica').text(formatDate(competition.lastEntryDate), rightCol + 100, currentY);
   
   doc.y += 25;
 
@@ -1263,156 +1263,200 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   const clubSectionY = doc.y;
   doc.rect(40, clubSectionY, doc.page.width - 80, 25).fill(lightGray);
   doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
-     .text('🏛️ CLUB INFORMATION', 50, clubSectionY + 8);
+     .text('CLUB INFORMATION', 50, clubSectionY + 8);
   
   doc.y = clubSectionY + 35;
   doc.fillColor('black');
+  // Build a clean location string (avoid undefined)
+  const safeText = (v) => (v === null || v === undefined || v === '' ? null : v);
+  const locationParts = [safeText(club.city), safeText(club.region?.regionName), safeText(club.region?.taluka?.talukaName)];
+  const location = locationParts.filter(Boolean).join(', ') || 'N/A';
   
-  // Club details in structured format
-  doc.fontSize(11).font('Helvetica-Bold').text('Club Name:', leftCol, doc.y);
-  doc.font('Helvetica').text(club.clubName, leftCol + 120, doc.y);
-  doc.y += lineHeight;
-  
-  doc.font('Helvetica-Bold').text('Affiliation Number:', leftCol, doc.y);
-  doc.font('Helvetica').text(club.affiliationNumber, leftCol + 120, doc.y);
-  
-  doc.font('Helvetica-Bold').text('Contact:', rightCol, doc.y - lineHeight);
-  doc.font('Helvetica').text(club.mobile, rightCol + 60, doc.y - lineHeight);
-  
-  doc.font('Helvetica-Bold').text('Email:', rightCol, doc.y);
-  doc.font('Helvetica').text(club.email, rightCol + 60, doc.y);
-  doc.y += lineHeight;
-  
-  doc.font('Helvetica-Bold').text('Location:', leftCol, doc.y);
-  doc.font('Helvetica').text(`${club.city}, ${club.state}`, leftCol + 120, doc.y);
-  doc.y += lineHeight;
-  
-  if (club.address) {
-    doc.font('Helvetica-Bold').text('Address:', leftCol, doc.y);
-    doc.font('Helvetica').text(club.address, leftCol + 120, doc.y, { width: 300 });
-    doc.y += lineHeight;
-  }
-  
-  if (club.region) {
-    doc.font('Helvetica-Bold').text('Region:', leftCol, doc.y);
-    doc.font('Helvetica').text(club.region.regionName, leftCol + 120, doc.y);
-    if (club.region.taluka) {
-      doc.font('Helvetica-Bold').text('Taluka:', rightCol, doc.y);
-      doc.font('Helvetica').text(club.region.taluka.talukaName, rightCol + 60, doc.y);
+  // Club details in a clean two-column grid
+  const LBL_W = 120;
+  const LEFT_VAL_W = 140;  // ensures no overlap with right column (leftCol + 120 + 140 = rightCol)
+  const RIGHT_LBL_W = 80;
+  const RIGHT_VAL_W = 140;
+  const rowMinH = 18;
+  const rowGap = 6;
+
+  const textOpts = (w) => ({ width: w, lineGap: 1 });
+  const measureH = (text, w) => {
+    if (!text && text !== 0) return 0;
+    return doc.font('Helvetica').fontSize(11).heightOfString(String(text), textOpts(w));
+  };
+
+  const renderInfoRow = (leftLabel, leftValue, rightLabel = null, rightValue = null) => {
+    const startY = doc.y;
+    const leftValText = leftValue ?? 'N/A';
+    const rightValText = rightValue ?? 'N/A';
+    const leftH = leftLabel ? measureH(leftValText, LEFT_VAL_W) : 0;
+    const rightH = rightLabel ? measureH(rightValText, RIGHT_VAL_W) : 0;
+    const rowH = Math.max(rowMinH, leftH, rightH);
+
+    // Left column
+    if (leftLabel) {
+      doc.fontSize(11).font('Helvetica-Bold').text(leftLabel, leftCol, startY);
+      doc.font('Helvetica').text(leftValText, leftCol + LBL_W, startY, textOpts(LEFT_VAL_W));
     }
-    doc.y += lineHeight;
+
+    // Right column
+    if (rightLabel) {
+      doc.font('Helvetica-Bold').text(rightLabel, rightCol, startY);
+      doc.font('Helvetica').text(rightValText, rightCol + RIGHT_LBL_W, startY, textOpts(RIGHT_VAL_W));
+    }
+
+    doc.y = startY + rowH + rowGap;
+  };
+
+  // Render rows
+  renderInfoRow('Club Name:', club.clubName, 'Contact:', club.mobile);
+  renderInfoRow('Affiliation Number:', club.affiliationNumber, 'Email:', club.email);
+  renderInfoRow('Location:', location);
+  if (club.address) {
+    renderInfoRow('Address:', club.address);
+  }
+  if (club.region) {
+    renderInfoRow('Region:', club.region.regionName, club.region?.taluka ? 'Taluka:' : null, club.region?.taluka?.talukaName || null);
   }
   
   doc.y += 15;
 
   // Players List Section
-  const playersSectionY = doc.y;
-  doc.rect(40, playersSectionY, doc.page.width - 80, 25).fill(lightGray);
-  doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
-     .text(`👥 REGISTERED PLAYERS (${registrations.length})`, 50, playersSectionY + 8);
-  
-  doc.y = playersSectionY + 35;
-  doc.fillColor('black');
+  const renderPlayersHeader = () => {
+    const headerY = doc.y;
+    doc.rect(40, headerY, doc.page.width - 80, 25).fill(lightGray);
+    doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
+      .text(`REGISTERED PLAYERS (${registrations.length})`, 50, headerY + 8);
+    doc.y = headerY + 35;
+    doc.fillColor('black');
+  };
 
   if (registrations.length === 0) {
+    renderPlayersHeader();
     // Empty state with better styling
     doc.rect(60, doc.y, doc.page.width - 120, 60).stroke('#e2e8f0');
     doc.fontSize(12).font('Helvetica').fillColor(secondaryColor)
        .text('No players registered for this competition yet.', 0, doc.y + 25, { align: 'center' });
     doc.fillColor('black');
   } else {
-    // Enhanced table with better styling
-    const tableStartY = doc.y;
-    const rowHeight = 30;
-    const headerHeight = 35;
-    let currentY = tableStartY;
+    // Photo grid layout (4 columns)
+    const cols = 4;
+    const gridLeft = 50; // aligns with previous table left
+    const gridWidth = 500; // fixed width used previously
+    const colW = gridWidth / cols;
+    const padding = 8;
+    const photoSize = Math.min(colW - padding * 2, 110); // square photo area
+    const nameBoxH = 24;
+    const cellH = photoSize + nameBoxH + padding * 2;
 
-    // Table header background
-    doc.rect(50, currentY, 500, headerHeight).fill(primaryColor);
-    
-    // Table headers with better spacing
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('white');
-    const headers = [
-      { text: 'Sr.', x: 60, width: 30 },
-      { text: 'Player Name', x: 95, width: 130 },
-      { text: 'Unique ID', x: 230, width: 90 },
-      { text: 'Position', x: 325, width: 70 },
-      { text: 'Age', x: 400, width: 35 },
-      { text: 'Mobile', x: 440, width: 70 },
-      { text: 'Status', x: 515, width: 50 }
-    ];
-    
-    headers.forEach(header => {
-      doc.text(header.text, header.x, currentY + 12, { width: header.width, align: 'center' });
-    });
+    // Helper to safely resolve image path from stored relative path
+    const resolveImagePath = (p) => {
+      if (!p) return null;
+      if (/^https?:\/\//i.test(p)) return null; // skip remote URLs for embedding
+      if (path.isAbsolute(p)) return fs.existsSync(p) ? p : null;
+      const abs = path.resolve(__dirname, '../../', p);
+      return fs.existsSync(abs) ? abs : null;
+    };
 
-    currentY += headerHeight;
-    doc.fillColor('black');
+    // Ensure header appears on a page with enough room for at least one cell
+    const footerSafeBottom = () => doc.page.height - 100; // keep clear of footer
+    if (doc.y + 25 + 10 + cellH > footerSafeBottom()) {
+      doc.addPage();
+    }
+    renderPlayersHeader();
 
-    // Draw player rows with alternating colors
-    registrations.forEach((registration, index) => {
-      const player = registration.player;
-      const fullName = `${player.firstName} ${player.middleName ? player.middleName + ' ' : ''}${player.lastName}`;
-      
-      // Check if we need a new page
-      if (currentY > 720) {
+    let startY = doc.y;
+    let x = gridLeft;
+    let y = startY;
+    // footerSafeBottom already defined above
+
+    registrations.forEach((reg, idx) => {
+      const player = reg.player;
+      const fullName = [player.firstName, player.middleName, player.lastName].filter(Boolean).join(' ').toUpperCase();
+
+      // Move to next row every 'cols' items
+      if (idx > 0 && idx % cols === 0) {
+        x = gridLeft;
+        y += cellH;
+      }
+
+      // Pagination check
+      if (y + cellH > footerSafeBottom()) {
         doc.addPage();
-        currentY = 50;
-        
-        // Redraw header on new page
-        doc.rect(50, currentY, 500, headerHeight).fill(primaryColor);
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('white');
-        headers.forEach(header => {
-          doc.text(header.text, header.x, currentY + 12, { width: header.width, align: 'center' });
-        });
-        currentY += headerHeight;
-        doc.fillColor('black');
+        // Re-add section header on new page
+        renderPlayersHeader();
+
+        // Reset grid position for new page
+        y = doc.y;
+        x = gridLeft;
       }
 
-      // Alternating row colors
-      if (index % 2 === 0) {
-        doc.rect(50, currentY, 500, rowHeight).fill('#f8fafc');
+      // Cell border
+      doc.rect(x, y, colW, cellH).stroke('#94a3b8');
+
+      // Photo frame
+      const imgX = x + padding;
+      const imgY = y + padding;
+      doc.rect(imgX, imgY, photoSize, photoSize).stroke('#cbd5e1');
+
+      const imgPath = resolveImagePath(player.profileImage);
+      if (imgPath) {
+        try {
+          // Fit image within the square while preserving aspect ratio
+          doc.image(imgPath, imgX, imgY, { fit: [photoSize, photoSize] });
+        } catch (_) {
+          // If image fails to load, fall back to placeholder
+          doc.fontSize(8).fillColor(secondaryColor)
+            .text('PHOTO ERROR', imgX, imgY + photoSize / 2 - 5, { width: photoSize, align: 'center' })
+            .fillColor('black');
+        }
+      } else {
+        // Placeholder when no image
+        doc.fontSize(8).fillColor(secondaryColor)
+          .text('NO PHOTO', imgX, imgY + photoSize / 2 - 5, { width: photoSize, align: 'center' })
+          .fillColor('black');
       }
 
-      // Row data
-      doc.fontSize(9).font('Helvetica');
-      const rowData = [
-        { text: `${index + 1}`, x: 60, width: 30 },
-        { text: fullName, x: 95, width: 130 },
-        { text: player.uniqueIdNumber || 'N/A', x: 230, width: 90 },
-        { text: player.position || 'N/A', x: 325, width: 70 },
-        { text: calculateAge(player.dateOfBirth).toString(), x: 400, width: 35 },
-        { text: player.mobile || 'N/A', x: 440, width: 70 },
-        { text: player.aadharVerified ? '✓ Verified' : '⏳ Pending', x: 515, width: 50 }
-      ];
-      
-      rowData.forEach(data => {
-        const textColor = data.text.includes('✓') ? '#16a34a' : data.text.includes('⏳') ? '#ea580c' : 'black';
-        doc.fillColor(textColor).text(data.text, data.x, currentY + 10, { 
-          width: data.width, 
-          align: data.x === 60 || data.x === 400 ? 'center' : 'left',
-          ellipsis: true
-        });
-      });
-      
-      doc.fillColor('black');
-      currentY += rowHeight;
+      // Name label
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('black')
+        .text(fullName || 'UNKNOWN', x + 2, imgY + photoSize + 6, { width: colW - 4, align: 'center' });
+
+      // Advance to next column
+      x += colW;
     });
 
-    // Table border
-    doc.rect(50, tableStartY, 500, currentY - tableStartY).stroke('#e2e8f0');
-    
-    // Summary box
-    doc.y = currentY + 20;
-    doc.rect(50, doc.y, 200, 40).fill('#f0f9ff').stroke(primaryColor);
-    doc.fontSize(11).font('Helvetica-Bold').fillColor(primaryColor)
-       .text('SUMMARY', 60, doc.y + 8);
-    doc.fontSize(10).font('Helvetica').fillColor('black')
-       .text(`Total Players: ${registrations.length}`, 60, doc.y + 22);
-    
-    const verifiedCount = registrations.filter(reg => reg.player.aadharVerified).length;
-    doc.text(`Verified: ${verifiedCount}`, 150, doc.y + 22);
+    // Signature/association area shown after the images (once, after grid)
+    const signAreaHeight = 60;
+    const minGapBelowGrid = 12; // ensure a small gap from the grid
+    const footerTop = doc.page.height - 60; // footer rectangle starts here
+    const bottomGap = 10; // gap above footer
+    const desiredBottomY = footerTop - bottomGap - signAreaHeight; // sit just above footer
+    let signY;
+    if (desiredBottomY < y + cellH + minGapBelowGrid) {
+      // Not enough room at the bottom under the grid; move to a fresh page
+      doc.addPage();
+      // Do NOT render players header here; this is not a new grid page
+      signY = doc.y + 20;
+    } else {
+      // Anchor to bottom safely above footer
+      signY = desiredBottomY;
+    }
+    // Layout constants for left/right alignment within content area
+    const contentLeft = 50; // align with left content
+    const contentWidth = doc.page.width - 100; // symmetric margins (50 each side)
+
+    // Left-aligned small label
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('black')
+      .text('seal of the association', contentLeft, signY, { width: contentWidth, align: 'left' });
+    // Right-aligned role above association name
+    doc.fontSize(10).font('Helvetica')
+      .text('secretary', contentLeft, signY, { width: contentWidth, align: 'right' });
+    // Association name under 'secretary' (right-aligned)
+    doc.fontSize(11).font('Helvetica-Bold')
+      .text('THANE JILHA KABADDI ASSOCIATION THANE GRAMIN', contentLeft, signY + 18, { width: contentWidth, align: 'right' });
   }
+  // Summary removed per request
 
   // Footer with better styling
   const footerY = doc.page.height - 60;
@@ -1428,8 +1472,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     minute: '2-digit'
   })}`, 50, footerY + 20);
   
-  // Add page number
-  doc.text(`Page 1`, doc.page.width - 100, footerY + 14, { align: 'right' });
+  // Page number removed (multi-page safe)
 
   // Finalize PDF
   doc.end();
