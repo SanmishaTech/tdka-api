@@ -226,18 +226,27 @@ const createPlayer = asyncHandler(async (req, res) => {
     const clubNumberMatch = club.uniqueNumber.match(/(TDKA\d+)$/);
     const clubNumber = clubNumberMatch ? clubNumberMatch[1] : "TDKA00";
     
-    // Count existing players for this club to generate sequential number
-    const clubPlayerCount = await prisma.player.count({
-      where: { clubId: finalClubId }
+    // Determine next sequence using the highest existing uniqueIdNumber for this club prefix
+    const prefix = `TDKA/${clubNumber}/`;
+    const lastPlayer = await prisma.player.findFirst({
+      where: { uniqueIdNumber: { startsWith: prefix } },
+      orderBy: { uniqueIdNumber: 'desc' },
+      select: { uniqueIdNumber: true }
     });
-    
-    const playerSequence = String(clubPlayerCount + 1).padStart(10, "0");
-    uniqueIdNumber = `TDKA/${clubNumber}/${playerSequence}`;
+    const lastSeq = lastPlayer ? parseInt((lastPlayer.uniqueIdNumber.split('/').pop() || '0'), 10) : 0;
+    const playerSequence = String(lastSeq + 1).padStart(10, "0");
+    uniqueIdNumber = `${prefix}${playerSequence}`;
   } else {
     // Fallback for players without clubs
-    const totalPlayerCount = await prisma.player.count();
-    const playerSequence = String(totalPlayerCount + 1).padStart(10, "0");
-    uniqueIdNumber = `TDKA/TDKA00/${playerSequence}`;
+    const prefix = `TDKA/TDKA00/`;
+    const lastPlayer = await prisma.player.findFirst({
+      where: { uniqueIdNumber: { startsWith: prefix } },
+      orderBy: { uniqueIdNumber: 'desc' },
+      select: { uniqueIdNumber: true }
+    });
+    const lastSeq = lastPlayer ? parseInt((lastPlayer.uniqueIdNumber.split('/').pop() || '0'), 10) : 0;
+    const playerSequence = String(lastSeq + 1).padStart(10, "0");
+    uniqueIdNumber = `${prefix}${playerSequence}`;
   }
 
   const playerData = {
@@ -284,23 +293,22 @@ const createPlayer = asyncHandler(async (req, res) => {
 
     res.status(201).json(player);
   } catch (error) {
-    // Handle Prisma unique constraint errors
     if (error.code === 'P2002') {
-      const field = error.meta?.target?.[0];
+      const target = error.meta?.target;
+      const fields = Array.isArray(target) ? target : (typeof target === 'string' ? [target] : []);
       let message = 'A player with this information already exists.';
       
-      if (field === 'aadharNumber') {
+      if (fields.includes('aadharNumber')) {
         message = 'A player with this Aadhar number already exists. Please check the Aadhar number and try again.';
-      } else if (field === 'mobile') {
+      } else if (fields.includes('mobile')) {
         message = 'A player with this mobile number already exists. Please check the mobile number and try again.';
-      } else if (field === 'uniqueIdNumber') {
+      } else if (fields.includes('uniqueIdNumber')) {
         message = 'A player with this unique ID already exists. Please try again.';
       }
       
       throw createError(409, message);
     }
     
-    // Re-throw other errors
     throw error;
   }
 });
@@ -326,14 +334,14 @@ const updatePlayer = asyncHandler(async (req, res) => {
   } = req.body;
 
   // Determine the clubId to use for updates
-  let finalClubId = undefined; // Use undefined to not update if not specified
+  let updateClubId = undefined; // Use undefined to not update if not specified
   
   if (clubId !== undefined) {
     if (req.user) {
       // If user is a club admin, they can only assign to their own club or remove (null)
       if (req.user.role === "clubadmin" && req.user.clubId) {
         if (clubId === null || clubId === "" || parseInt(clubId) === req.user.clubId) {
-          finalClubId = clubId ? parseInt(clubId) : null;
+          updateClubId = clubId ? parseInt(clubId) : null;
         } else {
           throw createError(403, "Club admins can only assign players to their own club");
         }
@@ -348,7 +356,7 @@ const updatePlayer = asyncHandler(async (req, res) => {
         });
         if (clubAdminUser && clubAdminUser.clubId) {
           if (clubId === null || clubId === "" || parseInt(clubId) === clubAdminUser.clubId) {
-            finalClubId = clubId ? parseInt(clubId) : null;
+            updateClubId = clubId ? parseInt(clubId) : null;
           } else {
             throw createError(403, "Club admins can only assign players to their own club");
           }
@@ -356,11 +364,11 @@ const updatePlayer = asyncHandler(async (req, res) => {
       }
       // For other roles (like super admin), use the provided clubId
       else {
-        finalClubId = clubId ? parseInt(clubId) : null;
+        updateClubId = clubId ? parseInt(clubId) : null;
       }
     } else {
       // Fallback to provided clubId if no user context
-      finalClubId = clubId ? parseInt(clubId) : null;
+      updateClubId = clubId ? parseInt(clubId) : null;
     }
   }
 
@@ -374,8 +382,8 @@ const updatePlayer = asyncHandler(async (req, res) => {
     address,
     mobile,
     aadharNumber,
-    aadharVerified: aadharVerified !== undefined ? aadharVerified === "true" : undefined,
-    clubId: finalClubId,
+    aadharVerified: aadharVerified !== undefined ? (aadharVerified === "true" || aadharVerified === true) : undefined,
+    clubId: updateClubId,
   };
 
   // Remove undefined values
@@ -416,14 +424,15 @@ const updatePlayer = asyncHandler(async (req, res) => {
   } catch (error) {
     // Handle Prisma unique constraint errors
     if (error.code === 'P2002') {
-      const field = error.meta?.target?.[0];
+      const target = error.meta?.target;
+      const fields = Array.isArray(target) ? target : (typeof target === 'string' ? [target] : []);
       let message = 'A player with this information already exists.';
       
-      if (field === 'aadharNumber') {
+      if (fields.includes('aadharNumber')) {
         message = 'A player with this Aadhar number already exists. Please check the Aadhar number and try again.';
-      } else if (field === 'mobile') {
+      } else if (fields.includes('mobile')) {
         message = 'A player with this mobile number already exists. Please check the mobile number and try again.';
-      } else if (field === 'uniqueIdNumber') {
+      } else if (fields.includes('uniqueIdNumber')) {
         message = 'A player with this unique ID already exists. Please try again.';
       }
       

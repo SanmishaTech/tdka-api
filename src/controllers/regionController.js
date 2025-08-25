@@ -347,7 +347,16 @@ const deleteRegion = async (req, res, next) => {
 
     res.json({ message: "Region deleted successfully." });
   } catch (error) {
-    next(error);
+    // Handle foreign key constraint violations gracefully (e.g., Clubs linked)
+    if (error && error.code === "P2003") {
+      return res.status(409).json({
+        errors: {
+          message:
+            "Cannot delete this region because one or more clubs are linked to it. Reassign or remove those clubs, then try again.",
+        },
+      });
+    }
+    return next(error);
   }
 };
 

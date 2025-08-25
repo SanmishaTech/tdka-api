@@ -185,9 +185,9 @@ const getClub = asyncHandler(async (req, res) => {
 const createClub = asyncHandler(async (req, res) => {
   const schema = z.object({
     clubName: z.string().min(1, "Club name is required").max(255),
-    affiliationNumber: z.string().min(1, "Affiliation number is required").max(255),
+    affiliationNumber: z.string().max(255).optional(),
     regionId: z.number().int().min(1, "Please select a region"),
-    city: z.string().min(1, "City is required").max(255),
+    city: z.string().max(255).optional(),
     address: z.string().min(1, "Address is required").max(500),
     mobile: z.string().min(1, "Mobile number is required").max(20),
     email: z.string().email("Valid email is required").max(255),
@@ -212,15 +212,15 @@ const createClub = asyncHandler(async (req, res) => {
     treasurerEmail: z.string().email("Valid treasurer email is required").max(255).optional(),
     treasurerAadhar: z.string().max(12).optional(),
     
-    // Coach details (name and mobile mandatory)
-    coachName: z.string().min(1, "Coach name is required").max(255),
-    coachMobile: z.string().min(1, "Coach mobile is required").max(20),
+    // Coach details (optional)
+    coachName: z.string().max(255).optional(),
+    coachMobile: z.string().max(20).optional(),
     coachEmail: z.string().email("Valid coach email is required").max(255).optional(),
     coachAadhar: z.string().max(12).optional(),
     
-    // Manager details (name and mobile mandatory)
-    managerName: z.string().min(1, "Manager name is required").max(255),
-    managerMobile: z.string().min(1, "Manager mobile is required").max(20),
+    // Manager details (optional)
+    managerName: z.string().max(255).optional(),
+    managerMobile: z.string().max(20).optional(),
     managerEmail: z.string().email("Valid manager email is required").max(255).optional(),
     managerAadhar: z.string().max(12).optional(),
   });
@@ -261,10 +261,10 @@ const createClub = asyncHandler(async (req, res) => {
     const club = await prisma.club.create({
       data: {
         clubName: validatedData.clubName,
-        affiliationNumber: validatedData.affiliationNumber,
+        affiliationNumber: validatedData.affiliationNumber ?? "",
         uniqueNumber: uniqueNumber,
         regionId: validatedData.regionId,
-        city: validatedData.city,
+        city: validatedData.city ?? "",
         address: validatedData.address,
         mobile: validatedData.mobile,
         email: validatedData.email,

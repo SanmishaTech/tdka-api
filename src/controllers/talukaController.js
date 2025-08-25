@@ -268,7 +268,16 @@ const deleteTaluka = async (req, res, next) => {
 
     res.json({ message: "Taluka deleted successfully." });
   } catch (error) {
-    next(error);
+    // Handle foreign key constraint violations gracefully (e.g., Regions/Clubs linked)
+    if (error && error.code === "P2003") {
+      return res.status(409).json({
+        errors: {
+          message:
+            "Cannot delete this taluka because regions or clubs are linked to it. Reassign or remove the linked clubs (and then regions), then try again.",
+        },
+      });
+    }
+    return next(error);
   }
 };
 
