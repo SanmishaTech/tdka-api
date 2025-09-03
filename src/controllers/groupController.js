@@ -123,8 +123,8 @@ const getGroup = asyncHandler(async (req, res) => {
 const createGroup = asyncHandler(async (req, res) => {
   const schema = z.object({
     groupName: z.string().min(1, "Group name is required").max(255),
-    gender: z.enum(["Men (A)", "Men (B)", "Women", "Boys", "Girls"], {
-      errorMap: () => ({ message: "Gender must be one of: Men (A), Men (B), Women, Boys, Girls" }),
+    gender: z.enum(["Men", "Women", "Boys", "Girls"], {
+      errorMap: () => ({ message: "Gender must be one of: Men, Women, Boys, Girls" }),
     }),
     age: z.string().min(1, "Age limit is required").max(50),
   });
@@ -149,8 +149,8 @@ const updateGroup = asyncHandler(async (req, res) => {
   const schema = z
     .object({
       groupName: z.string().min(1).max(255).optional(),
-      gender: z.enum(["Men (A)", "Men (B)", "Women", "Boys", "Girls"], {
-        errorMap: () => ({ message: "Gender must be one of: Men (A), Men (B), Women, Boys, Girls" }),
+      gender: z.enum(["Men", "Women", "Boys", "Girls"], {
+        errorMap: () => ({ message: "Gender must be one of: Men, Women, Boys, Girls" }),
       }).optional(),
       age: z.string().min(1).max(50).optional(),
     })
