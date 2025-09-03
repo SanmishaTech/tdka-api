@@ -39,7 +39,7 @@ const clubExcelUpload = createUploadMiddleware(
  *       200:
  *         description: List of all regions with taluka info
  */
-router.get("/regions", auth, clubController.getRegions);
+router.get("/regions", auth, clubController.getPlaces);
 
 /**
  * @swagger

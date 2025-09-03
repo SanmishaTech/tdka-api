@@ -33,8 +33,8 @@ model Club {
   id               Int       @id @default(autoincrement())
   clubName         String
   affiliationNumber String
-  uniqueNumber     String    @unique  // TDKA/(region abbrev)/TDKA01 format
-  regionId         Int       // Foreign key to Region
+  uniqueNumber     String    @unique  // TDKA/(place abbrev)/TDKA01 format
+  placeId          Int       // Foreign key to Place
   city             String
   address          String?
   mobile          String?
@@ -73,13 +73,13 @@ model Club {
   
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
-  region           Region    @relation(fields: [regionId], references: [id], onDelete: Restrict)
+  place            Place     @relation(fields: [placeId], references: [id], onDelete: Restrict)
   competitions     Competition[]
   players          Player[]  // One club can have many players
   users            User[]    // One club can have many users
   competitionRegistrations CompetitionRegistration[]
   
-  @@index([regionId])
+  @@index([placeId])
 }
 
 model Group{
@@ -94,32 +94,32 @@ model Group{
   @@map("groups")
 }
 
-model Taluka {
-  id               Int       @id @default(autoincrement())
-  number           Int       @unique // 2 digit number for that taluka
-  abbreviation     String    @unique // abbreviation of that taluka
-  talukaName       String    // taluka name
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  regions          Region[]  // One taluka can have many regions
-  
-  @@map("talukas")
-}
-
 model Region {
   id               Int       @id @default(autoincrement())
   number           Int       @unique // 2 digit number for that region
   abbreviation     String    @unique // abbreviation of that region
   regionName       String    // region name
-  talukaId         Int       // Foreign key to Taluka
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  places           Place[]   // One region can have many places
+  
+  @@map("regions")
+}
+
+model Place {
+  id               Int       @id @default(autoincrement())
+  number           Int       @unique // 2 digit number for that place
+  abbreviation     String    @unique // abbreviation of that place
+  placeName        String    // place name
+  regionId         Int       // Foreign key to Region
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   
-  taluka           Taluka    @relation(fields: [talukaId], references: [id], onDelete: Cascade)
-  clubs            Club[]    // One region can have many clubs
+  region           Region    @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  clubs            Club[]    // One place can have many clubs
   
-  @@index([talukaId])
-  @@map("regions")
+  @@index([regionId])
+  @@map("places")
 }
 
 model Competition{

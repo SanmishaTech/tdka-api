@@ -1,38 +1,41 @@
 const express = require("express");
 const router = express.Router();
-const talukaController = require("../controllers/talukaController");
+const placeController = require("../controllers/placeController");
 const auth = require("../middleware/auth");
 
 /**
  * @swagger
  * tags:
- *   name: Talukas
- *   description: Taluka management endpoints
+ *   name: Places
+ *   description: Place management endpoints
  */
 
 /**
  * @swagger
  * components:
  *   schemas:
- *     Taluka:
+ *     Place:
  *       type: object
  *       properties:
  *         id:
  *           type: integer
- *           description: The taluka ID
+ *           description: The place ID
  *         number:
  *           type: integer
- *           description: 2-digit number for the taluka
+ *           description: 2-digit number for the place
  *           minimum: 1
  *           maximum: 99
  *         abbreviation:
  *           type: string
- *           description: Abbreviation of the taluka
+ *           description: Abbreviation of the place
  *           maxLength: 10
- *         talukaName:
+ *         placeName:
  *           type: string
- *           description: Full name of the taluka
+ *           description: Full name of the place
  *           maxLength: 100
+ *         regionId:
+ *           type: integer
+ *           description: The region ID this place belongs to
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -45,10 +48,10 @@ const auth = require("../middleware/auth");
 
 /**
  * @swagger
- * /talukas:
+ * /places:
  *   get:
- *     summary: Get all talukas
- *     tags: [Talukas]
+ *     summary: Get all places
+ *     tags: [Places]
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -63,12 +66,12 @@ const auth = require("../middleware/auth");
  *         schema:
  *           type: integer
  *           default: 10
- *         description: Number of talukas per page
+ *         description: Number of places per page
  *       - in: query
  *         name: search
  *         schema:
  *           type: string
- *         description: Search term for taluka name or abbreviation
+ *         description: Search term for place name or abbreviation
  *       - in: query
  *         name: sortBy
  *         schema:
@@ -84,33 +87,64 @@ const auth = require("../middleware/auth");
  *         description: Sort order
  *     responses:
  *       200:
- *         description: List of talukas
+ *         description: List of places
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 talukas:
+ *                 places:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/Taluka'
+ *                     $ref: '#/components/schemas/Place'
  *                 page:
  *                   type: integer
  *                 totalPages:
  *                   type: integer
- *                 totalTalukas:
+ *                 totalPlaces:
  *                   type: integer
  *       401:
  *         description: Unauthorized
  */
-router.get("/", auth, talukaController.getTalukas);
+router.get("/", auth, placeController.getPlaces);
 
 /**
  * @swagger
- * /talukas/{id}:
+ * /places/regions:
  *   get:
- *     summary: Get taluka by ID
- *     tags: [Talukas]
+ *     summary: Get all regions for dropdown
+ *     tags: [Places]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of regions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   regionName:
+ *                     type: string
+ *                   abbreviation:
+ *                     type: string
+ *                   number:
+ *                     type: integer
+ *       401:
+ *         description: Unauthorized
+ */
+router.get("/regions", auth, placeController.getRegions);
+
+/**
+ * @swagger
+ * /places/{id}:
+ *   get:
+ *     summary: Get place by ID
+ *     tags: [Places]
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -119,27 +153,27 @@ router.get("/", auth, talukaController.getTalukas);
  *         schema:
  *           type: integer
  *         required: true
- *         description: Taluka ID
+ *         description: Place ID
  *     responses:
  *       200:
- *         description: Taluka data
+ *         description: Place data
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/Taluka'
+ *               $ref: '#/components/schemas/Place'
  *       401:
  *         description: Unauthorized
  *       404:
- *         description: Taluka not found
+ *         description: Place not found
  */
-router.get("/:id", auth, talukaController.getTalukaById);
+router.get("/:id", auth, placeController.getPlaceById);
 
 /**
  * @swagger
- * /talukas:
+ * /places:
  *   post:
- *     summary: Create a new taluka
- *     tags: [Talukas]
+ *     summary: Create a new place
+ *     tags: [Places]
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -151,41 +185,45 @@ router.get("/:id", auth, talukaController.getTalukaById);
  *             properties:
  *               number:
  *                 type: integer
- *                 description: 2-digit number for the taluka
+ *                 description: 2-digit number for the place
  *                 minimum: 1
  *                 maximum: 99
  *               abbreviation:
  *                 type: string
- *                 description: Abbreviation of the taluka (uppercase)
+ *                 description: Abbreviation of the place (uppercase)
  *                 maxLength: 10
- *               talukaName:
+ *               placeName:
  *                 type: string
- *                 description: Full name of the taluka
+ *                 description: Full name of the place
  *                 maxLength: 100
+ *               regionId:
+ *                 type: integer
+ *                 description: The region ID this place belongs to
  *             required:
  *               - number
  *               - abbreviation
- *               - talukaName
+ *               - placeName
+ *               - regionId
  *     responses:
  *       201:
- *         description: Taluka created successfully
+ *         description: Place created successfully
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/Taluka'
+ *               $ref: '#/components/schemas/Place'
  *       400:
  *         description: Bad request
  *       401:
  *         description: Unauthorized
  */
-router.post("/", auth, talukaController.createTaluka);
+router.post("/", auth, placeController.createPlace);
 
 /**
  * @swagger
- * /talukas/{id}:
+ * /places/{id}:
  *   put:
- *     summary: Update taluka by ID
- *     tags: [Talukas]
+ *     summary: Update place by ID
+ *     tags: [Places]
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -194,7 +232,7 @@ router.post("/", auth, talukaController.createTaluka);
  *         schema:
  *           type: integer
  *         required: true
- *         description: Taluka ID
+ *         description: Place ID
  *     requestBody:
  *       required: true
  *       content:
@@ -204,39 +242,42 @@ router.post("/", auth, talukaController.createTaluka);
  *             properties:
  *               number:
  *                 type: integer
- *                 description: 2-digit number for the taluka
+ *                 description: 2-digit number for the place
  *                 minimum: 1
  *                 maximum: 99
  *               abbreviation:
  *                 type: string
- *                 description: Abbreviation of the taluka (uppercase)
+ *                 description: Abbreviation of the place (uppercase)
  *                 maxLength: 10
- *               talukaName:
+ *               placeName:
  *                 type: string
- *                 description: Full name of the taluka
+ *                 description: Full name of the place
  *                 maxLength: 100
+ *               regionId:
+ *                 type: integer
+ *                 description: The region ID this place belongs to
  *     responses:
  *       200:
- *         description: Taluka updated successfully
+ *         description: Place updated successfully
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/Taluka'
+ *               $ref: '#/components/schemas/Place'
  *       400:
  *         description: Bad request
  *       401:
  *         description: Unauthorized
  *       404:
- *         description: Taluka not found
+ *         description: Place not found
  */
-router.put("/:id", auth, talukaController.updateTaluka);
+router.put("/:id", auth, placeController.updatePlace);
 
 /**
  * @swagger
- * /talukas/{id}:
+ * /places/{id}:
  *   delete:
- *     summary: Delete taluka by ID
- *     tags: [Talukas]
+ *     summary: Delete place by ID
+ *     tags: [Places]
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -245,15 +286,15 @@ router.put("/:id", auth, talukaController.updateTaluka);
  *         schema:
  *           type: integer
  *         required: true
- *         description: Taluka ID
+ *         description: Place ID
  *     responses:
  *       200:
- *         description: Taluka deleted successfully
+ *         description: Place deleted successfully
  *       401:
  *         description: Unauthorized
  *       404:
- *         description: Taluka not found
+ *         description: Place not found
  */
-router.delete("/:id", auth, talukaController.deleteTaluka);
+router.delete("/:id", auth, placeController.deletePlace);
 
 module.exports = router;

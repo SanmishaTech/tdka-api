@@ -33,20 +33,6 @@ const auth = require("../middleware/auth");
  *           type: string
  *           description: Full name of the region
  *           maxLength: 100
- *         talukaId:
- *           type: integer
- *           description: ID of the associated taluka
- *         taluka:
- *           type: object
- *           properties:
- *             id:
- *               type: integer
- *             talukaName:
- *               type: string
- *             abbreviation:
- *               type: string
- *             number:
- *               type: integer
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -82,7 +68,7 @@ const auth = require("../middleware/auth");
  *         name: search
  *         schema:
  *           type: string
- *         description: Search term for region name, abbreviation, or taluka
+ *         description: Search term for region name or abbreviation
  *       - in: query
  *         name: sortBy
  *         schema:
@@ -118,37 +104,6 @@ const auth = require("../middleware/auth");
  *         description: Unauthorized
  */
 router.get("/", auth, regionController.getRegions);
-
-/**
- * @swagger
- * /regions/talukas:
- *   get:
- *     summary: Get all talukas for dropdown
- *     tags: [Regions]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: List of talukas
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: integer
- *                   talukaName:
- *                     type: string
- *                   abbreviation:
- *                     type: string
- *                   number:
- *                     type: integer
- *       401:
- *         description: Unauthorized
- */
-router.get("/talukas", auth, regionController.getTalukas);
 
 /**
  * @swagger
@@ -207,14 +162,10 @@ router.get("/:id", auth, regionController.getRegionById);
  *                 type: string
  *                 description: Full name of the region
  *                 maxLength: 100
- *               talukaId:
- *                 type: integer
- *                 description: ID of the associated taluka
  *             required:
  *               - number
  *               - abbreviation
  *               - regionName
- *               - talukaId
  *     responses:
  *       201:
  *         description: Region created successfully
@@ -264,9 +215,6 @@ router.post("/", auth, regionController.createRegion);
  *                 type: string
  *                 description: Full name of the region
  *                 maxLength: 100
- *               talukaId:
- *                 type: integer
- *                 description: ID of the associated taluka
  *     responses:
  *       200:
  *         description: Region updated successfully

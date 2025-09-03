@@ -16,8 +16,6 @@ const getRegions = async (req, res, next) => {
     OR: [
       { regionName: { contains: search } },
       { abbreviation: { contains: search } },
-      { taluka: { talukaName: { contains: search } } },
-      { taluka: { abbreviation: { contains: search } } },
     ],
   };
 
@@ -26,17 +24,7 @@ const getRegions = async (req, res, next) => {
       where: whereClause,
       skip: skip,
       take: limit,
-      orderBy: sortBy === "talukaName" ? { taluka: { talukaName: sortOrder } } : { [sortBy]: sortOrder },
-      include: {
-        taluka: {
-          select: {
-            id: true,
-            talukaName: true,
-            abbreviation: true,
-            number: true
-          }
-        }
-      }
+      orderBy: { [sortBy]: sortOrder },
     });
 
     const totalRegions = await prisma.region.count({
@@ -60,16 +48,6 @@ const getRegionById = async (req, res, next) => {
   try {
     const region = await prisma.region.findUnique({
       where: { id: parseInt(req.params.id) },
-      include: {
-        taluka: {
-          select: {
-            id: true,
-            talukaName: true,
-            abbreviation: true,
-            number: true
-          }
-        }
-      }
     });
     
     if (!region) {
@@ -127,21 +105,6 @@ const createRegion = async (req, res, next) => {
       .refine((val) => /^[A-Za-z\s\u0900-\u097F]+$/.test(val), {
         message: "Region name can only contain letters and spaces.",
       }),
-    talukaId: z
-      .number()
-      .int()
-      .min(1, "Please select a valid taluka.")
-      .refine(
-        async (talukaId) => {
-          const existing = await prisma.taluka.findUnique({
-            where: { id: talukaId },
-          });
-          return !!existing;
-        },
-        {
-          message: "Selected taluka does not exist.",
-        }
-      ),
   });
 
   // Validate the request body using Zod
@@ -167,18 +130,7 @@ const createRegion = async (req, res, next) => {
         number: req.body.number,
         abbreviation: req.body.abbreviation.toUpperCase(),
         regionName: req.body.regionName,
-        talukaId: req.body.talukaId,
       },
-      include: {
-        taluka: {
-          select: {
-            id: true,
-            talukaName: true,
-            abbreviation: true,
-            number: true
-          }
-        }
-      }
     });
 
     res.status(201).json(region);
@@ -249,26 +201,6 @@ const updateRegion = async (req, res, next) => {
         message: "Region name can only contain letters and spaces.",
       })
       .optional(),
-    talukaId: z
-      .number()
-      .int()
-      .min(1, "Please select a valid taluka.")
-      .optional()
-      .superRefine(async (talukaId, ctx) => {
-        if (talukaId) {
-          const existing = await prisma.taluka.findUnique({
-            where: { id: talukaId },
-          });
-          if (!existing) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Selected taluka does not exist.",
-            });
-            return false;
-          }
-        }
-        return true;
-      }),
   });
 
   // Validate the request body using Zod
@@ -305,21 +237,10 @@ const updateRegion = async (req, res, next) => {
     if (req.body.number !== undefined) updateData.number = req.body.number;
     if (req.body.abbreviation !== undefined) updateData.abbreviation = req.body.abbreviation.toUpperCase();
     if (req.body.regionName !== undefined) updateData.regionName = req.body.regionName;
-    if (req.body.talukaId !== undefined) updateData.talukaId = req.body.talukaId;
 
     const region = await prisma.region.update({
       where: { id: regionId },
       data: updateData,
-      include: {
-        taluka: {
-          select: {
-            id: true,
-            talukaName: true,
-            abbreviation: true,
-            number: true
-          }
-        }
-      }
     });
 
     res.json(region);
@@ -347,35 +268,16 @@ const deleteRegion = async (req, res, next) => {
 
     res.json({ message: "Region deleted successfully." });
   } catch (error) {
-    // Handle foreign key constraint violations gracefully (e.g., Clubs linked)
+    // Handle foreign key constraint violations gracefully (e.g., Places/Clubs linked)
     if (error && error.code === "P2003") {
       return res.status(409).json({
         errors: {
           message:
-            "Cannot delete this region because one or more clubs are linked to it. Reassign or remove those clubs, then try again.",
+            "Cannot delete this region because places or clubs are linked to it. Reassign or remove the linked clubs (and then places), then try again.",
         },
       });
     }
     return next(error);
-  }
-};
-
-// Get all talukas for dropdown
-const getTalukas = async (req, res, next) => {
-  try {
-    const talukas = await prisma.taluka.findMany({
-      select: {
-        id: true,
-        talukaName: true,
-        abbreviation: true,
-        number: true
-      },
-      orderBy: { number: "asc" }
-    });
-    
-    res.json(talukas);
-  } catch (error) {
-    next(error);
   }
 };
 
@@ -385,5 +287,4 @@ module.exports = {
   createRegion,
   updateRegion,
   deleteRegion,
-  getTalukas,
 };

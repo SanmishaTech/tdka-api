@@ -155,12 +155,12 @@ const getCompetitions = asyncHandler(async (req, res) => {
             city: true,
             mobile: true,
             email: true,
-            region: {
+            place: {
               select: {
-                regionName: true,
-                taluka: {
+                placeName: true,
+                region: {
                   select: {
-                    talukaName: true
+                    regionName: true
                   }
                 }
               }
@@ -252,12 +252,12 @@ const getCompetition = asyncHandler(async (req, res) => {
           city: true,
           mobile: true,
           email: true,
-          region: {
+          place: {
             select: {
-              regionName: true,
-              taluka: {
+              placeName: true,
+              region: {
                 select: {
-                  talukaName: true
+                  regionName: true
                 }
               }
             }
@@ -1108,9 +1108,9 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   const club = await prisma.club.findUnique({
     where: { id: clubId },
     include: {
-      region: {
+      place: {
         include: {
-          taluka: true
+          region: true
         }
       }
     }
@@ -1588,7 +1588,12 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
           clubName: true,
           affiliationNumber: true,
           city: true,
-          region: { select: { regionName: true } },
+          place: {
+            select: {
+              placeName: true,
+              region: { select: { regionName: true } }
+            }
+          },
         },
         orderBy: { clubName: 'asc' },
       },
@@ -1755,7 +1760,7 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
         { text: club.clubName || 'N/A', x: 95, width: 180 },
         { text: club.affiliationNumber || 'N/A', x: 280, width: 100 },
         { text: club.city || 'N/A', x: 385, width: 70 },
-        { text: club.region?.regionName || 'N/A', x: 460, width: 90 },
+        { text: club.place?.region?.regionName || 'N/A', x: 460, width: 90 },
       ];
       row.forEach(col => {
         doc.text(col.text, col.x, currentY + 8, { width: col.width, align: (col.align || 'left') });

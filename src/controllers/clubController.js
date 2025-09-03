@@ -74,7 +74,7 @@ const getClubs = asyncHandler(async (req, res) => {
         clubName: true,
         affiliationNumber: true,
         uniqueNumber: true,
-        regionId: true,
+        placeId: true,
         city: true,
         address: true,
         mobile: true,
@@ -138,7 +138,7 @@ const getClub = asyncHandler(async (req, res) => {
       clubName: true,
       affiliationNumber: true,
       uniqueNumber: true,
-      regionId: true,
+      placeId: true,
       city: true,
       address: true,
       mobile: true,
@@ -187,7 +187,7 @@ const createClub = asyncHandler(async (req, res) => {
   const schema = z.object({
     clubName: z.string().min(1, "Club name is required").max(255),
     affiliationNumber: z.string().max(255).optional(),
-    regionId: z.number().int().min(1, "Please select a region"),
+    placeId: z.number().int().min(1, "Please select a place"),
     city: z.string().max(255).optional(),
     address: z.string().max(500).optional(),
     mobile: z.string().max(20).optional(),
@@ -242,21 +242,21 @@ const createClub = asyncHandler(async (req, res) => {
     }
   });
   // Coerce known numeric fields if they arrive as strings
-  if (preprocessedCreateData.regionId !== undefined) {
-    preprocessedCreateData.regionId = Number(preprocessedCreateData.regionId);
+  if (preprocessedCreateData.placeId !== undefined) {
+    preprocessedCreateData.placeId = Number(preprocessedCreateData.placeId);
   }
 
   // Will throw Zod errors caught by asyncHandler
   const validatedData = await schema.parseAsync(preprocessedCreateData);
 
-  // Validate that the region exists
-  const region = await prisma.region.findUnique({
-    where: { id: validatedData.regionId },
-    include: { taluka: true }
+  // Validate that the place exists
+  const place = await prisma.place.findUnique({
+    where: { id: validatedData.placeId },
+    include: { region: true }
   });
   
-  if (!region) {
-    throw createError(400, "Selected region does not exist");
+  if (!place) {
+    throw createError(400, "Selected place does not exist");
   }
 
   // Hash the password before saving
@@ -266,10 +266,10 @@ const createClub = asyncHandler(async (req, res) => {
   const result = await prisma.$transaction(async (prisma) => {
     // Generate unique club number
     const clubCount = await prisma.club.count({
-      where: { regionId: validatedData.regionId }
+      where: { placeId: validatedData.placeId }
     });
     const clubNumber = (clubCount + 1).toString().padStart(2, '0');
-    const uniqueNumber = `TDKA/${region.abbreviation}/TDKA${clubNumber}`;
+    const uniqueNumber = `TDKA/${place.abbreviation}/TDKA${clubNumber}`;
 
     // Create the club
     const club = await prisma.club.create({
@@ -277,7 +277,7 @@ const createClub = asyncHandler(async (req, res) => {
         clubName: validatedData.clubName,
         affiliationNumber: validatedData.affiliationNumber ?? "",
         uniqueNumber: uniqueNumber,
-        regionId: validatedData.regionId,
+        placeId: validatedData.placeId,
         city: validatedData.city ?? "",
         address: validatedData.address,
         mobile: validatedData.mobile,
@@ -401,8 +401,8 @@ const updateClub = asyncHandler(async (req, res) => {
     }
   });
   // Coerce known numeric fields if they arrive as strings
-  if (preprocessedData.regionId !== undefined) {
-    preprocessedData.regionId = Number(preprocessedData.regionId);
+  if (preprocessedData.placeId !== undefined) {
+    preprocessedData.placeId = Number(preprocessedData.placeId);
   }
 
   const validatedData = await schema.parseAsync(preprocessedData);
@@ -490,18 +490,18 @@ const deleteClub = asyncHandler(async (req, res) => {
   res.json({ message: "Club deleted successfully" });
 });
 
-// Get regions for dropdown
-const getRegions = asyncHandler(async (req, res) => {
-  const regions = await prisma.region.findMany({
+// Get places for dropdown
+const getPlaces = asyncHandler(async (req, res) => {
+  const places = await prisma.place.findMany({
     select: {
       id: true,
-      regionName: true,
+      placeName: true,
       abbreviation: true,
       number: true,
-      taluka: {
+      region: {
         select: {
           id: true,
-          talukaName: true,
+          regionName: true,
           abbreviation: true,
           number: true
         }
@@ -510,7 +510,7 @@ const getRegions = asyncHandler(async (req, res) => {
     orderBy: [{ number: "asc" }]
   });
   
-  res.json(regions);
+  res.json(places);
 });
 
 // Import clubs from Excel
@@ -563,18 +563,18 @@ const importClubs = asyncHandler(async (req, res) => {
       headerMap[v] = colNumber;
     });
 
-    const requiredHeaders = ["club name", "region", "email"];
+    const requiredHeaders = ["club name", "place", "email"];
     const missingHeaders = requiredHeaders.filter((h) => !headerMap[h]);
     if (missingHeaders.length) {
       return res.status(400).json({ errors: { file: [{ type: "missing_headers", message: `Missing headers: ${missingHeaders.join(", ")}` }] } });
     }
 
-    // Build region lookup (by regionName or abbreviation, case-insensitive)
-    const regions = await prisma.region.findMany({ select: { id: true, regionName: true, abbreviation: true } });
-    const regionLookup = new Map();
-    for (const r of regions) {
-      regionLookup.set(String(r.regionName).trim().toLowerCase(), r);
-      regionLookup.set(String(r.abbreviation).trim().toLowerCase(), r);
+    // Build place lookup (by placeName or abbreviation, case-insensitive)
+    const places = await prisma.place.findMany({ select: { id: true, placeName: true, abbreviation: true } });
+    const placeLookup = new Map();
+    for (const p of places) {
+      placeLookup.set(String(p.placeName).trim().toLowerCase(), p);
+      placeLookup.set(String(p.abbreviation).trim().toLowerCase(), p);
     }
 
     // Prepare results
@@ -594,18 +594,18 @@ const importClubs = asyncHandler(async (req, res) => {
 
       results.rowsProcessed++;
       const clubName = readCellStr(row.getCell(headerMap["club name"]));
-      const regionText = readCellStr(row.getCell(headerMap["region"]));
+      const placeText = readCellStr(row.getCell(headerMap["place"]));
       const email = readCellStr(row.getCell(headerMap["email"]));
 
       // Basic validation
       const rowErrors = [];
       if (!clubName) rowErrors.push("Club Name is required");
-      if (!regionText) rowErrors.push("Region is required");
+      if (!placeText) rowErrors.push("Place is required");
       if (!email) rowErrors.push("Email is required");
 
-      // Resolve region
-      const region = regionText ? regionLookup.get(regionText.toLowerCase()) : null;
-      if (!region) rowErrors.push(`Region not found: ${regionText}`);
+      // Resolve place
+      const place = placeText ? placeLookup.get(placeText.toLowerCase()) : null;
+      if (!place) rowErrors.push(`Place not found: ${placeText}`);
 
       // Duplicate checks
       if (email) {
@@ -618,24 +618,24 @@ const importClubs = asyncHandler(async (req, res) => {
       }
 
       if (rowErrors.length) {
-        results.errors.push({ row: rowNumber, email, clubName, region: regionText, messages: rowErrors });
+        results.errors.push({ row: rowNumber, email, clubName, place: placeText, messages: rowErrors });
         continue;
       }
 
       // Create records in a transaction to ensure uniqueNumber generation and consistency
       try {
         await prisma.$transaction(async (tx) => {
-          // Generate unique club number within region
-          const clubCount = await tx.club.count({ where: { regionId: region.id } });
+          // Generate unique club number within place
+          const clubCount = await tx.club.count({ where: { placeId: place.id } });
           const clubNumber = (clubCount + 1).toString().padStart(2, "0");
-          const uniqueNumber = `TDKA/${region.abbreviation}/TDKA${clubNumber}`;
+          const uniqueNumber = `TDKA/${place.abbreviation}/TDKA${clubNumber}`;
 
           const club = await tx.club.create({
             data: {
               clubName,
               affiliationNumber: "",
               uniqueNumber,
-              regionId: region.id,
+              placeId: place.id,
               city: "",
               address: "",
               mobile: "",
@@ -683,7 +683,7 @@ const importClubs = asyncHandler(async (req, res) => {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
           message = `Unique constraint violation on ${Array.isArray(err.meta?.target) ? err.meta.target.join(", ") : err.meta?.target}`;
         }
-        results.errors.push({ row: rowNumber, email, clubName, region: regionText, messages: [message] });
+        results.errors.push({ row: rowNumber, email, clubName, place: placeText, messages: [message] });
       }
     }
 
@@ -720,7 +720,7 @@ module.exports = {
   getClub,
   updateClub,
   deleteClub,
-  getRegions,
+  getPlaces,
   importClubs,
   downloadClubImportTemplate: asyncHandler(async (req, res) => {
     // Generate a simple Excel template with required headers
@@ -729,7 +729,7 @@ module.exports = {
     worksheet.columns = [
       { header: "Club Name", key: "clubName", width: 30 },
       { header: "Email", key: "email", width: 32 },
-      { header: "Region", key: "region", width: 20 },
+      { header: "Place", key: "place", width: 20 },
     ];
 
     // Optionally add a sample row (left blank to avoid accidental import)
