@@ -36,8 +36,8 @@ model Club {
   uniqueNumber     String    @unique  // TDKA/(region abbrev)/TDKA01 format
   regionId         Int       // Foreign key to Region
   city             String
-  address          String
-  mobile          String
+  address          String?
+  mobile          String?
   email            String
   password         String
   

@@ -1,8 +1,24 @@
 const express = require("express");
 const clubController = require("../controllers/clubController");
 const auth = require("../middleware/auth");
+const createUploadMiddleware = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
+
+// Upload middleware configuration for club Excel import
+const clubExcelUpload = createUploadMiddleware(
+  "clubs",
+  [
+    {
+      name: "file",
+      allowedTypes: [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+      ],
+      maxSize: 5 * 1024 * 1024, // 5MB
+    },
+  ]
+);
 
 /**
  * @swagger
@@ -24,6 +40,46 @@ const router = express.Router();
  *         description: List of all regions with taluka info
  */
 router.get("/regions", auth, clubController.getRegions);
+
+/**
+ * @swagger
+ * /clubs/import:
+ *   post:
+ *     summary: Import clubs from Excel
+ *     tags: [Clubs]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *             required:
+ *               - file
+ *     responses:
+ *       200:
+ *         description: Import result summary
+ */
+router.post("/import", auth, ...clubExcelUpload, clubController.importClubs);
+
+/**
+ * @swagger
+ * /clubs/import/template:
+ *   get:
+ *     summary: Download Excel template for club import
+ *     tags: [Clubs]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Excel file with headers Club Name, Email, Region
+ */
+router.get("/import/template", auth, clubController.downloadClubImportTemplate);
 
 /**
  * @swagger

@@ -3,6 +3,7 @@ const prisma = new PrismaClient();
 const { z } = require("zod");
 const createError = require("http-errors");
 const bcrypt = require("bcryptjs");
+const ExcelJS = require("exceljs");
 
 /**
  * Wrap async route handlers and funnel errors through Express error middleware.
@@ -188,8 +189,8 @@ const createClub = asyncHandler(async (req, res) => {
     affiliationNumber: z.string().max(255).optional(),
     regionId: z.number().int().min(1, "Please select a region"),
     city: z.string().max(255).optional(),
-    address: z.string().min(1, "Address is required").max(500),
-    mobile: z.string().min(1, "Mobile number is required").max(20),
+    address: z.string().max(500).optional(),
+    mobile: z.string().max(20).optional(),
     email: z.string().email("Valid email is required").max(255),
     password: z.string().min(6, "Password must be at least 6 characters").max(255),
     role: z.string().default("clubadmin"),
@@ -227,10 +228,23 @@ const createClub = asyncHandler(async (req, res) => {
 
   // Preprocess data: convert empty strings to undefined for proper optional handling
   const preprocessedCreateData = {};
-  Object.keys(req.body || {}).forEach(key => {
+  Object.keys(req.body || {}).forEach((key) => {
     const value = req.body[key];
-    preprocessedCreateData[key] = (typeof value === 'string' && value.trim() === '') ? undefined : value;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") {
+        // Drop empty string fields entirely so optional schema fields are not validated
+        return;
+      }
+      preprocessedCreateData[key] = value;
+    } else {
+      preprocessedCreateData[key] = value;
+    }
   });
+  // Coerce known numeric fields if they arrive as strings
+  if (preprocessedCreateData.regionId !== undefined) {
+    preprocessedCreateData.regionId = Number(preprocessedCreateData.regionId);
+  }
 
   // Will throw Zod errors caught by asyncHandler
   const validatedData = await schema.parseAsync(preprocessedCreateData);
@@ -373,10 +387,23 @@ const updateClub = asyncHandler(async (req, res) => {
 
   // Preprocess data: convert empty strings to undefined for proper optional handling
   const preprocessedData = {};
-  Object.keys(req.body).forEach(key => {
+  Object.keys(req.body || {}).forEach((key) => {
     const value = req.body[key];
-    preprocessedData[key] = (typeof value === 'string' && value.trim() === '') ? undefined : value;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") {
+        // Drop empty string fields entirely so optional schema fields are not validated
+        return;
+      }
+      preprocessedData[key] = value;
+    } else {
+      preprocessedData[key] = value;
+    }
   });
+  // Coerce known numeric fields if they arrive as strings
+  if (preprocessedData.regionId !== undefined) {
+    preprocessedData.regionId = Number(preprocessedData.regionId);
+  }
 
   const validatedData = await schema.parseAsync(preprocessedData);
 
@@ -486,6 +513,207 @@ const getRegions = asyncHandler(async (req, res) => {
   res.json(regions);
 });
 
+// Import clubs from Excel
+const importClubs = asyncHandler(async (req, res) => {
+  try {
+    // Handle upload validation errors from middleware
+    if (req.uploadErrors && Object.keys(req.uploadErrors).length > 0) {
+      return res.status(400).json({ errors: req.uploadErrors });
+    }
+
+    // Ensure file was uploaded
+    const fileField = req.files && req.files.file;
+    const uploadedFile = Array.isArray(fileField) && fileField.length > 0 ? fileField[0] : null;
+    if (!uploadedFile) {
+      return res.status(400).json({ errors: { file: [{ type: "required", message: "Excel file is required under field 'file'" }] } });
+    }
+
+    const filePath = uploadedFile.path;
+
+    // Load workbook
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      return res.status(400).json({ errors: { file: [{ type: "invalid", message: "No worksheet found in Excel file" }] } });
+    }
+
+    // Helper: normalize ExcelJS cell value to a plain string (handles rich text and hyperlinks)
+    const readCellStr = (cell) => {
+      const v = cell?.value;
+      if (v == null) return "";
+      const t = typeof v;
+      if (t === "string" || t === "number" || t === "boolean") return String(v).trim();
+      if (t === "object") {
+        // HyperlinkValue { text, hyperlink }
+        if (typeof v.text === "string") return v.text.trim();
+        // RichText { richText: [{ text }] }
+        if (Array.isArray(v.richText)) return v.richText.map((r) => r?.text ?? "").join("").trim();
+        // Formula result
+        if (v.result != null) return String(v.result).trim();
+      }
+      return String(v).trim();
+    };
+
+    // Map headers to columns
+    const headerMap = {};
+    const headersRow = worksheet.getRow(1);
+    headersRow.eachCell((cell, colNumber) => {
+      const v = readCellStr(cell).toLowerCase();
+      headerMap[v] = colNumber;
+    });
+
+    const requiredHeaders = ["club name", "region", "email"];
+    const missingHeaders = requiredHeaders.filter((h) => !headerMap[h]);
+    if (missingHeaders.length) {
+      return res.status(400).json({ errors: { file: [{ type: "missing_headers", message: `Missing headers: ${missingHeaders.join(", ")}` }] } });
+    }
+
+    // Build region lookup (by regionName or abbreviation, case-insensitive)
+    const regions = await prisma.region.findMany({ select: { id: true, regionName: true, abbreviation: true } });
+    const regionLookup = new Map();
+    for (const r of regions) {
+      regionLookup.set(String(r.regionName).trim().toLowerCase(), r);
+      regionLookup.set(String(r.abbreviation).trim().toLowerCase(), r);
+    }
+
+    // Prepare results
+    const results = {
+      rowsProcessed: 0,
+      created: 0,
+      errors: [],
+    };
+
+    const defaultPassword = "tdka@123";
+    const hashedDefaultPassword = await bcrypt.hash(defaultPassword, 10);
+
+    // Iterate rows starting from 2
+    for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+      if (!row || row.values?.length === 0) continue;
+
+      results.rowsProcessed++;
+      const clubName = readCellStr(row.getCell(headerMap["club name"]));
+      const regionText = readCellStr(row.getCell(headerMap["region"]));
+      const email = readCellStr(row.getCell(headerMap["email"]));
+
+      // Basic validation
+      const rowErrors = [];
+      if (!clubName) rowErrors.push("Club Name is required");
+      if (!regionText) rowErrors.push("Region is required");
+      if (!email) rowErrors.push("Email is required");
+
+      // Resolve region
+      const region = regionText ? regionLookup.get(regionText.toLowerCase()) : null;
+      if (!region) rowErrors.push(`Region not found: ${regionText}`);
+
+      // Duplicate checks
+      if (email) {
+        const [existingClub, existingUser] = await Promise.all([
+          prisma.club.findFirst({ where: { email } }),
+          prisma.user.findUnique({ where: { email } }),
+        ]);
+        if (existingClub) rowErrors.push("A club with this email already exists");
+        if (existingUser) rowErrors.push("A user with this email already exists");
+      }
+
+      if (rowErrors.length) {
+        results.errors.push({ row: rowNumber, email, clubName, region: regionText, messages: rowErrors });
+        continue;
+      }
+
+      // Create records in a transaction to ensure uniqueNumber generation and consistency
+      try {
+        await prisma.$transaction(async (tx) => {
+          // Generate unique club number within region
+          const clubCount = await tx.club.count({ where: { regionId: region.id } });
+          const clubNumber = (clubCount + 1).toString().padStart(2, "0");
+          const uniqueNumber = `TDKA/${region.abbreviation}/TDKA${clubNumber}`;
+
+          const club = await tx.club.create({
+            data: {
+              clubName,
+              affiliationNumber: "",
+              uniqueNumber,
+              regionId: region.id,
+              city: "",
+              address: "",
+              mobile: "",
+              email,
+              password: hashedDefaultPassword,
+
+              presidentName: null,
+              presidentMobile: null,
+              presidentEmail: null,
+              presidentAadhar: null,
+              secretaryName: null,
+              secretaryMobile: null,
+              secretaryEmail: null,
+              secretaryAadhar: null,
+              treasurerName: null,
+              treasurerMobile: null,
+              treasurerEmail: null,
+              treasurerAadhar: null,
+              coachName: null,
+              coachMobile: null,
+              coachEmail: null,
+              coachAadhar: null,
+              managerName: null,
+              managerMobile: null,
+              managerEmail: null,
+              managerAadhar: null,
+            },
+          });
+
+          await tx.user.create({
+            data: {
+              name: clubName,
+              email,
+              password: hashedDefaultPassword,
+              role: "clubadmin",
+              active: true,
+              clubId: club.id,
+            },
+          });
+        });
+        results.created++;
+      } catch (err) {
+        console.error("Row import failed", { row: rowNumber, err });
+        let message = "Failed to import row";
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+          message = `Unique constraint violation on ${Array.isArray(err.meta?.target) ? err.meta.target.join(", ") : err.meta?.target}`;
+        }
+        results.errors.push({ row: rowNumber, email, clubName, region: regionText, messages: [message] });
+      }
+    }
+
+    // Cleanup uploaded files
+    if (req.cleanupUpload) {
+      try {
+        await req.cleanupUpload(req);
+      } catch (cleanupErr) {
+        console.error("Cleanup after import failed", cleanupErr);
+      }
+    }
+
+    return res.json({
+      summary: {
+        rowsProcessed: results.rowsProcessed,
+        created: results.created,
+        errors: results.errors.length,
+      },
+      errors: results.errors,
+    });
+  } catch (error) {
+    console.error("Import clubs error", error);
+    // Attempt cleanup even on fatal error
+    if (req && req.cleanupUpload) {
+      try { await req.cleanupUpload(req); } catch {}
+    }
+    return res.status(500).json({ errors: { message: "Failed to import clubs" } });
+  }
+});
+
 module.exports = {
   getClubs,
   createClub,
@@ -493,4 +721,33 @@ module.exports = {
   updateClub,
   deleteClub,
   getRegions,
+  importClubs,
+  downloadClubImportTemplate: asyncHandler(async (req, res) => {
+    // Generate a simple Excel template with required headers
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Clubs");
+    worksheet.columns = [
+      { header: "Club Name", key: "clubName", width: 30 },
+      { header: "Email", key: "email", width: 32 },
+      { header: "Region", key: "region", width: 20 },
+    ];
+
+    // Optionally add a sample row (left blank to avoid accidental import)
+    // worksheet.addRow({ clubName: "", email: "", region: "" });
+
+    // Add a note row as comments in first row below headers (not required)
+    // You can extend with a second sheet for instructions if needed
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="TDKA_Clubs_Import_Template.xlsx"'
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  }),
 };
