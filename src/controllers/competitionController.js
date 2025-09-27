@@ -1269,7 +1269,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   doc.fillColor('black');
   // Build a clean location string (avoid undefined)
   const safeText = (v) => (v === null || v === undefined || v === '' ? null : v);
-  const locationParts = [safeText(club.city), safeText(club.region?.regionName), safeText(club.region?.taluka?.talukaName)];
+  const locationParts = [safeText(club.city), safeText(club.place?.placeName), safeText(club.place?.region?.regionName)];
   const location = locationParts.filter(Boolean).join(', ') || 'N/A';
   
   // Club details in a clean two-column grid
@@ -1316,8 +1316,8 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   if (club.address) {
     renderInfoRow('Address:', club.address);
   }
-  if (club.region) {
-    renderInfoRow('Region:', club.region.regionName, club.region?.taluka ? 'Taluka:' : null, club.region?.taluka?.talukaName || null);
+  if (club.place?.region) {
+    renderInfoRow('Region:', club.place.region.regionName, 'Place:', club.place.placeName);
   }
   
   doc.y += 15;

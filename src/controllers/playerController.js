@@ -147,9 +147,9 @@ const getPlayerById = asyncHandler(async (req, res) => {
       groups: true,
       club: {
         include: {
-          region: {
+          place: {
             include: {
-              taluka: true
+              region: true
             }
           }
         }
@@ -497,9 +497,9 @@ const getPlayerClub = asyncHandler(async (req, res) => {
     include: {
       club: {
         include: {
-          region: {
+          place: {
             include: {
-              taluka: true
+              region: true
             }
           }
         }
