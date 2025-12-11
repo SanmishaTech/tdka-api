@@ -14,6 +14,11 @@ const playerImageUpload = createUploadMiddleware(
       allowedTypes: ["image/jpeg", "image/jpg", "image/png"],
       maxSize: 2 * 1024 * 1024, // 2MB for passport size image
     },
+    {
+      name: "aadharImage",
+      allowedTypes: ["image/jpeg", "image/jpg", "image/png"],
+      maxSize: 2 * 1024 * 1024, // 2MB
+    },
   ]
 );
 
@@ -197,6 +202,12 @@ router.get("/", auth, playerController.getPlayers);
  *       404:
  *         description: Player not found
  */
+// Aadhaar verification routes (Smart OCR)
+// Without playerId – client uploads Aadhaar image and number; useful before creating player
+router.post("/verify-aadhar", auth, ...playerImageUpload, playerController.verifyAadharOCR);
+// With playerId – server can use stored image; optional file upload to re-verify
+router.post("/:id/verify-aadhar", auth, ...playerImageUpload, playerController.verifyAadharOCR);
+
 router.get("/:id", auth, playerController.getPlayerById);
 
 /**

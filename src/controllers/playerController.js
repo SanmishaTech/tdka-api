@@ -266,6 +266,9 @@ const createPlayer = asyncHandler(async (req, res) => {
   if (req.files?.profileImage) {
     playerData.profileImage = req.files.profileImage[0].path;
   }
+  if (req.files?.aadharImage) {
+    playerData.aadharImage = req.files.aadharImage[0].path;
+  }
 
   try {
     const player = await prisma.player.create({
@@ -394,6 +397,9 @@ const updatePlayer = asyncHandler(async (req, res) => {
   if (req.files?.profileImage) {
     updateData.profileImage = req.files.profileImage[0].path;
   }
+  if (req.files?.aadharImage) {
+    updateData.aadharImage = req.files.aadharImage[0].path;
+  }
 
   try {
     const player = await prisma.player.update({
@@ -485,6 +491,118 @@ const toggleAadharVerification = asyncHandler(async (req, res) => {
   });
 
   res.json(player);
+});
+
+// Verify Aadhaar using Cashfree Smart OCR
+const verifyAadharOCR = asyncHandler(async (req, res) => {
+  /*
+    This endpoint supports two modes:
+    1. Without playerId (POST /api/players/verify-aadhar) – client sends the Aadhaar image file that needs to be verified.
+    2. With playerId    (POST /api/players/:id/verify-aadhar) – server picks existing stored Aadhaar image of the player if
+       file is not provided.
+
+       Body / multipart fields:
+       - aadharNumber     (string, required)
+       - file             (image, optional)
+  */
+  const playerId = req.params.id ? parseInt(req.params.id) : undefined;
+  const { aadharNumber } = req.body;
+
+  if (!aadharNumber || aadharNumber.length !== 12) {
+    throw createError(400, "Invalid or missing Aadhar number");
+  }
+
+  // Identify the file path or uploaded file
+  let filePathToUse;
+
+  if (req.files?.aadharImage && req.files.aadharImage[0]) {
+    filePathToUse = req.files.aadharImage[0].path;
+  } else if (req.files?.file && req.files.file[0]) {
+    // Accept generic field name `file` also
+    filePathToUse = req.files.file[0].path;
+  }
+
+  if (!filePathToUse && playerId) {
+    // Fallback to existing player's Aadhaar image stored in DB
+    const player = await prisma.player.findUnique({
+      where: { id: playerId },
+      select: { aadharImage: true }
+    });
+    if (!player) throw createError(404, "Player not found");
+    if (!player.aadharImage) {
+      throw createError(400, "Player does not have an Aadhaar image on record. Upload an image to verify.");
+    }
+    filePathToUse = player.aadharImage;
+  }
+
+  if (!filePathToUse) {
+    throw createError(400, "Aadhaar image file is required for verification");
+  }
+
+  // --- Build form-data payload for Cashfree ---
+  const fs = require("fs");
+  const path = require("path");
+  const FormData = require("form-data");
+  const axios = require("axios");
+
+  const formData = new FormData();
+  // Generate a deterministic verification_id if player exists, else random UUID
+  const { v4: uuidv4 } = require("uuid");
+  const verificationId = playerId ? `player_${playerId}` : uuidv4();
+
+  formData.append("verification_id", verificationId);
+  formData.append("document_type", "AADHAAR");
+  // Cashfree API can reject filenames with spaces/special chars, so pass a clean filename
+  const origExt = path.extname(filePathToUse) || ".jpg";
+  const safeFilename = `aadhaar${origExt}`;
+  formData.append("file", fs.createReadStream(path.resolve(filePathToUse)), safeFilename);
+
+  const CASHFREE_BASE_URL = process.env.CASHFREE_BASE_URL || "https://api.cashfree.com";
+  const CASHFREE_CLIENT_ID = process.env.CASHFREE_CLIENT_ID;
+  const CASHFREE_CLIENT_SECRET = process.env.CASHFREE_CLIENT_SECRET;
+  const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || "2024-12-01";
+
+  if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
+    throw createError(500, "Cashfree credentials not configured");
+  }
+
+  try {
+    const response = await axios.post(
+      `${CASHFREE_BASE_URL}/verification/bharat-ocr`,
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders(),
+          "x-api-version": CASHFREE_API_VERSION,
+          "x-client-id": CASHFREE_CLIENT_ID,
+          "x-client-secret": CASHFREE_CLIENT_SECRET,
+        },
+        timeout: 15000,
+      }
+    );
+
+    const result = response.data;
+
+    // If a playerId was supplied and result is VALID, mark Aadhaar as verified
+    if (playerId && result?.status === "VALID") {
+      await prisma.player.update({
+        where: { id: playerId },
+        data: { aadharVerified: true },
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      cashfreeResponse: result,
+      aadharVerified: result?.status === "VALID",
+    });
+  } catch (err) {
+    console.error("Cashfree OCR error", err.response?.data || err.message);
+    throw createError(
+      err.response?.status || 500,
+      err.response?.data?.message || "Failed to verify Aadhaar via Cashfree"
+    );
+  }
 });
 
 // Get player's current club
@@ -651,5 +769,6 @@ module.exports = {
   getClubPlayers,
   transferPlayer,
   removePlayerFromClub,
-  getClubStats
+  getClubStats,
+  verifyAadharOCR
 };

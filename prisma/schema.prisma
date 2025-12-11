@@ -160,6 +160,7 @@ model Player {
   mobile           String
   aadharNumber     String    @unique
   profileImage     String?   // Path to profile image
+  aadharImage     String?   // Path to Aadhar image
   aadharVerified   Boolean   @default(false)
   isSuspended      Boolean   @default(false)
   clubId           Int?      // Foreign key to Club (nullable for players without clubs)
