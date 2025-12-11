@@ -548,7 +548,7 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
   const formData = new FormData();
   // Generate a deterministic verification_id if player exists, else random UUID
   const { v4: uuidv4 } = require("uuid");
-  const verificationId = playerId ? `player_${playerId}` : uuidv4();
+  const verificationId = playerId ? `player_${playerId}_${Date.now()}` : uuidv4();
 
   formData.append("verification_id", verificationId);
   formData.append("document_type", "AADHAAR");
@@ -583,8 +583,38 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
 
     const result = response.data;
 
-    // If a playerId was supplied and result is VALID, mark Aadhaar as verified
-    if (playerId && result?.status === "VALID") {
+    // --- Cross-check with existing player data (name & DOB) ---
+    let nameMatch = true;
+    let dobMatch = true;
+    let mismatchReasons = [];
+
+    if (playerId && result?.document_fields) {
+      const docName = (result.document_fields.name || "").trim().toLowerCase().replace(/\s+/g, " ");
+      const docDob  = result.document_fields.dob;
+
+      const player = await prisma.player.findUnique({
+        where: { id: playerId },
+        select: { firstName: true, middleName: true, lastName: true, dateOfBirth: true }
+      });
+      if (player) {
+        const docTokens = docName.split(" ");
+        const firstMatch = docTokens.includes(player.firstName.toLowerCase());
+        const lastMatch  = docTokens.includes(player.lastName.toLowerCase());
+        nameMatch = firstMatch && lastMatch;
+        if (!nameMatch) mismatchReasons.push("Name does not match");
+
+        if (docDob) {
+          const playerDobStr = player.dateOfBirth.toISOString().split("T")[0];
+          dobMatch = playerDobStr === docDob;
+          if (!dobMatch) mismatchReasons.push("Date of birth does not match");
+        }
+      }
+    }
+
+    const allMatch = nameMatch && dobMatch;
+
+    // If a playerId was supplied and result is VALID and allMatch, mark Aadhaar as verified
+    if (playerId && result?.status === "VALID" && allMatch) {
       await prisma.player.update({
         where: { id: playerId },
         data: { aadharVerified: true },
@@ -594,7 +624,9 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
     res.status(200).json({
       success: true,
       cashfreeResponse: result,
-      aadharVerified: result?.status === "VALID",
+      aadharVerified: result?.status === "VALID" && allMatch,
+      allMatch,
+      mismatchReasons
     });
   } catch (err) {
     console.error("Cashfree OCR error", err.response?.data || err.message);
