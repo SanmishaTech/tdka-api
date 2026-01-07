@@ -1462,8 +1462,8 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     const footerY1 = pageBottom - 56;
     const footerY2 = pageBottom - 42;
     doc.font('Helvetica').fontSize(8).fillColor('black').text('seal of the association', pageLeft, footerY1);
-    doc.font('Helvetica').fontSize(8).fillColor('black').text('secretary', pageLeft, footerY1, { width: contentW, align: 'center' });
-    doc.font('Helvetica').fontSize(8).fillColor('black').text(clubNameUpper || '-', pageLeft, footerY2, { width: contentW, align: 'center' });
+    doc.font('Helvetica').fontSize(8).fillColor('black').text('secretary', pageLeft, footerY1, { width: contentW, align: 'right' });
+    doc.font('Helvetica').fontSize(8).fillColor('black').text(clubNameUpper || '-', pageLeft, footerY2, { width: contentW, align: 'right' });
   }
 
   const resolveLocalImagePath = (p) => {
@@ -1531,12 +1531,12 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     const footerY2 = pageBottom - 42;
 
     doc.font('Helvetica').fontSize(8).fillColor('black').text('seal of the association', pageLeft, footerY1);
-    doc.font('Helvetica').fontSize(8).fillColor('black').text('secretary', pageLeft, footerY1, { width: contentW, align: 'center' });
+    doc.font('Helvetica').fontSize(8).fillColor('black').text('secretary', pageLeft, footerY1, { width: contentW, align: 'right' });
     doc
       .font('Helvetica')
       .fontSize(8)
       .fillColor('black')
-      .text(String(club.clubName || '').toUpperCase(), pageLeft, footerY2, { width: contentW, align: 'center' });
+      .text(String(club.clubName || '').toUpperCase(), pageLeft, footerY2, { width: contentW, align: 'right' });
   };
 
   const renderPlayersGrid = () => {
