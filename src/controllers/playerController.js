@@ -2,6 +2,9 @@ const { PrismaClient } = require("@prisma/client");
 const asyncHandler = require("express-async-handler");
 const createError = require("http-errors");
 const ExcelJS = require("exceljs");
+const PDFDocument = require("pdfkit");
+const fs = require("fs");
+const path = require("path");
 
 const prisma = new PrismaClient();
 
@@ -160,6 +163,181 @@ const getPlayerById = asyncHandler(async (req, res) => {
   if (!player) throw createError(404, "Player not found");
 
   res.json(player);
+});
+
+const generatePlayerICardPDF = asyncHandler(async (req, res) => {
+  const playerId = parseInt(req.params.id);
+  if (!playerId) throw createError(400, "Invalid player ID");
+
+  const player = await prisma.player.findUnique({
+    where: { id: playerId },
+    include: {
+      club: {
+        include: {
+          place: {
+            include: {
+              region: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!player) throw createError(404, "Player not found");
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      if (player.clubId !== req.user.clubId) {
+        throw createError(403, "Forbidden");
+      }
+    } else if (req.user.role === "CLUB") {
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin",
+        },
+        select: {
+          clubId: true,
+        },
+      });
+
+      if (clubAdminUser?.clubId && player.clubId !== clubAdminUser.clubId) {
+        throw createError(403, "Forbidden");
+      }
+    }
+  }
+
+  const fullName = [player.firstName, player.middleName, player.lastName]
+    .filter(Boolean)
+    .join(" ");
+  const dob = player.dateOfBirth ? player.dateOfBirth.toISOString().split("T")[0] : "";
+  const clubName = player.club?.clubName || "No Club";
+  const regionName = player.club?.place?.region?.regionName || "";
+
+  const safeId = (player.uniqueIdNumber || `player_${player.id}`).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const filename = `${safeId}_icard.pdf`;
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+  const cardW = 420;
+  const cardH = 250;
+  const outerPad = 8;
+  const headerH = 38;
+
+  const doc = new PDFDocument({ size: [cardW, cardH], margin: 0 });
+  doc.pipe(res);
+
+  doc
+    .rect(outerPad, outerPad, cardW - outerPad * 2, cardH - outerPad * 2)
+    .lineWidth(1.2)
+    .stroke("#0f172a");
+  doc
+    .rect(outerPad, outerPad, cardW - outerPad * 2, headerH)
+    .fill("#1e3a8a");
+  doc
+    .fillColor("#ffffff")
+    .font("Helvetica-Bold")
+    .fontSize(12)
+    .text("TDKA PLAYER ICARD", outerPad + 14, outerPad + 13);
+
+  const resolveImagePath = (p) => {
+    if (!p) return null;
+    if (/^https?:\/\//i.test(p)) return null;
+    if (path.isAbsolute(p)) return fs.existsSync(p) ? p : null;
+    const abs = path.resolve(__dirname, "../../", p);
+    return fs.existsSync(abs) ? abs : null;
+  };
+
+  const resolveTDKALogoPath = () => {
+    const candidates = [
+      path.resolve(__dirname, "../../..", "frontend", "public", "TDKA logo.png"),
+      path.resolve(__dirname, "../../..", "frontend", "dist", "TDKA logo.png"),
+      path.resolve(process.cwd(), "frontend", "public", "TDKA logo.png"),
+      path.resolve(process.cwd(), "frontend", "dist", "TDKA logo.png"),
+      path.resolve(process.cwd(), "TDKA logo.png"),
+    ];
+
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    return null;
+  };
+
+  const leftX = outerPad + 16;
+  const contentTop = outerPad + headerH + 18;
+
+  const photoBoxSize = 92;
+  const photoX = cardW - outerPad - 16 - photoBoxSize;
+  const photoY = contentTop;
+  doc.rect(photoX, photoY, photoBoxSize, photoBoxSize).stroke("#94a3b8");
+
+  const imgPath = resolveImagePath(player.profileImage);
+  const logoPath = resolveTDKALogoPath();
+  const fallbackImagePath = imgPath || logoPath;
+  if (fallbackImagePath) {
+    try {
+      doc.image(fallbackImagePath, photoX + 6, photoY + 6, {
+        fit: [photoBoxSize - 12, photoBoxSize - 12],
+        align: "center",
+        valign: "center",
+      });
+    } catch (_) {
+      doc
+        .font("Helvetica")
+        .fontSize(8)
+        .fillColor("#64748b")
+        .text("PHOTO ERROR", photoX, photoY + photoBoxSize / 2 - 4, {
+          width: photoBoxSize,
+          align: "center",
+        });
+    }
+  } else {
+    doc
+      .font("Helvetica")
+      .fontSize(8)
+      .fillColor("#64748b")
+      .text("NO PHOTO", photoX, photoY + photoBoxSize / 2 - 4, {
+        width: photoBoxSize,
+        align: "center",
+      });
+  }
+
+  const contentWidth = photoX - leftX - 14;
+
+  doc
+    .fillColor("#0f172a")
+    .font("Helvetica-Bold")
+    .fontSize(16)
+    .text(fullName || "-", leftX, contentTop, {
+      width: contentWidth,
+    });
+
+  const labelColor = "#334155";
+  const valueColor = "#0f172a";
+  const labelFontSize = 9;
+  const valueFontSize = 9;
+  const labelW = 56;
+
+  const rowY1 = contentTop + 38;
+  doc.font("Helvetica-Bold").fontSize(labelFontSize).fillColor(labelColor).text("DOB:", leftX, rowY1);
+  doc.font("Helvetica").fontSize(valueFontSize).fillColor(valueColor).text(dob || "-", leftX + labelW, rowY1, { width: contentWidth - labelW });
+
+  const rowY2 = rowY1 + 18;
+  doc.font("Helvetica-Bold").fontSize(labelFontSize).fillColor(labelColor).text("CLUB:", leftX, rowY2);
+  doc.font("Helvetica").fontSize(valueFontSize).fillColor(valueColor).text(clubName || "-", leftX + labelW, rowY2, { width: contentWidth - labelW });
+
+  const rowY3 = rowY2 + 18;
+  doc.font("Helvetica-Bold").fontSize(labelFontSize).fillColor(labelColor).text("REGION:", leftX, rowY3);
+  doc.font("Helvetica").fontSize(valueFontSize).fillColor(valueColor).text(regionName || "-", leftX + labelW, rowY3, { width: contentWidth - labelW });
+
+  doc.end();
 });
 
 // Create new player
@@ -583,10 +761,40 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
 
     const result = response.data;
 
+    const normalizeDigits = (val) =>
+      (val ?? "").toString().replace(/\D/g, "");
+    const inputAadharDigits = normalizeDigits(aadharNumber);
+
     // --- Cross-check with existing player data (name & DOB) ---
     let nameMatch = true;
     let dobMatch = true;
+    let aadharNumberMatch = true;
     let mismatchReasons = [];
+
+    const docAadharRaw =
+      result?.document_fields?.aadhaar_number ??
+      result?.document_fields?.aadhar_number ??
+      result?.document_fields?.aadhaar ??
+      result?.document_fields?.document_number ??
+      result?.document_fields?.id_number ??
+      result?.document_fields?.uid ??
+      result?.document_fields?.uid_number;
+    const docAadharDigits = normalizeDigits(docAadharRaw);
+
+    if (result?.document_fields) {
+      if (docAadharDigits.length === 12) {
+        aadharNumberMatch = docAadharDigits === inputAadharDigits;
+      } else if (docAadharDigits.length >= 4) {
+        aadharNumberMatch = inputAadharDigits.endsWith(docAadharDigits);
+      } else {
+        aadharNumberMatch = false;
+      }
+
+      if (!aadharNumberMatch) mismatchReasons.push("Aadhar number does not match");
+    } else {
+      aadharNumberMatch = false;
+      mismatchReasons.push("Aadhar number does not match");
+    }
 
     if (playerId && result?.document_fields) {
       const docName = (result.document_fields.name || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -594,9 +802,17 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
 
       const player = await prisma.player.findUnique({
         where: { id: playerId },
-        select: { firstName: true, middleName: true, lastName: true, dateOfBirth: true }
+        select: { firstName: true, middleName: true, lastName: true, dateOfBirth: true, aadharNumber: true }
       });
       if (player) {
+        const playerAadharDigits = normalizeDigits(player.aadharNumber);
+        if (playerAadharDigits && inputAadharDigits && playerAadharDigits !== inputAadharDigits) {
+          aadharNumberMatch = false;
+          if (!mismatchReasons.includes("Aadhar number does not match")) {
+            mismatchReasons.push("Aadhar number does not match");
+          }
+        }
+
         const docTokens = docName.split(" ");
         const firstMatch = docTokens.includes(player.firstName.toLowerCase());
         const lastMatch  = docTokens.includes(player.lastName.toLowerCase());
@@ -611,7 +827,7 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
       }
     }
 
-    const allMatch = nameMatch && dobMatch;
+    const allMatch = nameMatch && dobMatch && aadharNumberMatch;
 
     // If a playerId was supplied and result is VALID and allMatch, mark Aadhaar as verified
     if (playerId && result?.status === "VALID" && allMatch) {
@@ -625,6 +841,7 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
       success: true,
       cashfreeResponse: result,
       aadharVerified: result?.status === "VALID" && allMatch,
+      aadharNumberMatch,
       allMatch,
       mismatchReasons
     });
@@ -793,6 +1010,7 @@ const getClubStats = asyncHandler(async (req, res) => {
 module.exports = {
   getPlayers,
   getPlayerById,
+  generatePlayerICardPDF,
   createPlayer,
   updatePlayer,
   toggleSuspension,

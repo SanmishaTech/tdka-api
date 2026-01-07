@@ -1199,282 +1199,414 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     return age;
   };
 
-  // Colors
-  const primaryColor = '#2563eb';
-  const secondaryColor = '#64748b';
-  const lightGray = '#f1f5f9';
-  const darkGray = '#334155';
+  const primaryRed = '#dc2626';
+  const borderColor = '#000000';
 
-  // Header with logo area and title
-  doc.rect(40, 40, doc.page.width - 80, 80).fill(primaryColor);
-  
-  // Title in header
-  doc.fontSize(24).font('Helvetica-Bold').fillColor('white')
-     .text('COMPETITION REGISTRATION DETAILS', 60, 70, { align: 'center' });
-  
-  // Reset position after header
-  doc.y = 140;
-  doc.fillColor('black');
+  const pageLeft = doc.page.margins.left;
+  const pageRight = doc.page.width - doc.page.margins.right;
+  const pageTop = doc.page.margins.top;
+  const pageBottom = doc.page.height - doc.page.margins.bottom;
+  const contentW = pageRight - pageLeft;
 
-  // Competition Information Section
-  const sectionY = doc.y;
-  doc.rect(40, sectionY, doc.page.width - 80, 25).fill(lightGray);
-  doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
-     .text('COMPETITION INFORMATION', 50, sectionY + 8);
-  
-  doc.y = sectionY + 35;
-  doc.fillColor('black');
-  
-  // Competition details in a structured format
-  const leftCol = 60;
-  const rightCol = 320;
-  const lineHeight = 18;
-  
-  // Row: Competition Name
-  let currentY = doc.y;
-  doc.fontSize(11).font('Helvetica-Bold').text('Competition Name:', leftCol, currentY);
-  doc.font('Helvetica').text(competition.competitionName, leftCol + 120, currentY);
-  doc.y = currentY + lineHeight;
-  
-  // Row: Competition Period
-  currentY = doc.y;
-  doc.font('Helvetica-Bold').text('Competition Period:', leftCol, currentY);
-  doc.font('Helvetica').text(`${formatDate(competition.fromDate)} to ${formatDate(competition.toDate)}`, leftCol + 120, currentY);
-  doc.y = currentY + lineHeight;
-  
-  // Row: Eligibility Date (left) and Max Players (right)
-  currentY = doc.y;
-  doc.font('Helvetica-Bold').text('Eligibility Date:', leftCol, currentY);
-  const eligibility = formatDate(competition.ageEligibilityDate);
-  doc.font('Helvetica').text(eligibility, leftCol + 120, currentY);
-  
-  doc.font('Helvetica-Bold').text('Max Players:', rightCol, currentY);
-  doc.font('Helvetica').text(competition.maxPlayers.toString(), rightCol + 80, currentY);
-  doc.y = currentY + lineHeight;
-  
-  // Row: Last Entry Date (full row on right column baseline)
-  currentY = doc.y;
-  doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, currentY, { width: 100 });
-  doc.font('Helvetica').text(formatDate(competition.lastEntryDate), rightCol + 100, currentY);
-  
-  doc.y += 25;
+  const safeText = (v) => (v === null || v === undefined || String(v).trim() === '' ? '-' : String(v));
 
-  // Club Information Section
-  const clubSectionY = doc.y;
-  doc.rect(40, clubSectionY, doc.page.width - 80, 25).fill(lightGray);
-  doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
-     .text('CLUB INFORMATION', 50, clubSectionY + 8);
-  
-  doc.y = clubSectionY + 35;
-  doc.fillColor('black');
-  // Build a clean location string (avoid undefined)
-  const safeText = (v) => (v === null || v === undefined || v === '' ? null : v);
-  const locationParts = [safeText(club.city), safeText(club.place?.placeName), safeText(club.place?.region?.regionName)];
-  const location = locationParts.filter(Boolean).join(', ') || 'N/A';
-  
-  // Club details in a clean two-column grid
-  const LBL_W = 120;
-  const LEFT_VAL_W = 140;  // ensures no overlap with right column (leftCol + 120 + 140 = rightCol)
-  const RIGHT_LBL_W = 80;
-  const RIGHT_VAL_W = 140;
-  const rowMinH = 18;
-  const rowGap = 6;
-
-  const textOpts = (w) => ({ width: w, lineGap: 1 });
-  const measureH = (text, w) => {
-    if (!text && text !== 0) return 0;
-    return doc.font('Helvetica').fontSize(11).heightOfString(String(text), textOpts(w));
-  };
-
-  const renderInfoRow = (leftLabel, leftValue, rightLabel = null, rightValue = null) => {
-    const startY = doc.y;
-    const leftValText = leftValue ?? 'N/A';
-    const rightValText = rightValue ?? 'N/A';
-    const leftH = leftLabel ? measureH(leftValText, LEFT_VAL_W) : 0;
-    const rightH = rightLabel ? measureH(rightValText, RIGHT_VAL_W) : 0;
-    const rowH = Math.max(rowMinH, leftH, rightH);
-
-    // Left column
-    if (leftLabel) {
-      doc.fontSize(11).font('Helvetica-Bold').text(leftLabel, leftCol, startY);
-      doc.font('Helvetica').text(leftValText, leftCol + LBL_W, startY, textOpts(LEFT_VAL_W));
+  const formatDateDMY = (d) => {
+    if (!d) return '-';
+    try {
+      const dt = new Date(d);
+      const dd = String(dt.getDate()).padStart(2, '0');
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const yyyy = String(dt.getFullYear());
+      return `${dd}-${mm}-${yyyy}`;
+    } catch (_) {
+      return '-';
     }
+  };
 
-    // Right column
-    if (rightLabel) {
-      doc.font('Helvetica-Bold').text(rightLabel, rightCol, startY);
-      doc.font('Helvetica').text(rightValText, rightCol + RIGHT_LBL_W, startY, textOpts(RIGHT_VAL_W));
+  const resolveTDKALogoPath = () => {
+    const candidates = [
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'TDKA logo.png'),
+      path.resolve(__dirname, '../../..', 'frontend', 'dist', 'TDKA logo.png'),
+      path.resolve(process.cwd(), 'frontend', 'public', 'TDKA logo.png'),
+      path.resolve(process.cwd(), 'frontend', 'dist', 'TDKA logo.png'),
+    ];
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch (_) {
+        // ignore
+      }
     }
-
-    doc.y = startY + rowH + rowGap;
+    return null;
   };
 
-  // Render rows
-  renderInfoRow('Club Name:', club.clubName, 'Contact:', club.mobile);
-  renderInfoRow('Affiliation Number:', club.affiliationNumber, 'Email:', club.email);
-  renderInfoRow('Location:', location);
-  if (club.address) {
-    renderInfoRow('Address:', club.address);
-  }
-  if (club.place?.region) {
-    renderInfoRow('Region:', club.place.region.regionName, 'Place:', club.place.placeName);
-  }
-  
-  doc.y += 15;
+  const underLabelRaw = competition.age || computeUnderAgeLabel(competition.ageEligibilityDate) || '';
+  const entryAgeTitle = (() => {
+    const m = String(underLabelRaw).match(/Under\s+(\d+)/i);
+    if (m?.[1]) return `under ${m[1]}th -`;
+    return String(underLabelRaw || '').trim() ? `${String(underLabelRaw).toLowerCase()} -` : '';
+  })();
 
-  // Players List Section
-  const renderPlayersHeader = () => {
-    const headerY = doc.y;
-    doc.rect(40, headerY, doc.page.width - 80, 25).fill(lightGray);
-    doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
-      .text(`REGISTERED PLAYERS (${registrations.length})`, 50, headerY + 8);
-    doc.y = headerY + 35;
-    doc.fillColor('black');
+  const locationParts = [club.address, club.city, club.place?.placeName, club.place?.region?.regionName]
+    .map((x) => (x ? String(x).trim() : ''))
+    .filter(Boolean);
+  const clubLocation = locationParts.join(', ') || '-';
+
+  const logoPath = resolveTDKALogoPath();
+  const headerY = pageTop;
+  const logoSize = 56;
+  const logoX = pageLeft;
+  const logoY = headerY;
+
+  if (logoPath) {
+    try {
+      doc.image(logoPath, logoX, logoY, { fit: [logoSize, logoSize] });
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  const assocName = 'THANE JILHA KABADDI ASSOCIATION';
+  const assocLine1 = `Office: ${safeText(clubLocation)}`;
+  const assocLine2 = `Phone: ${safeText(club.mobile)}   Email: ${safeText(club.email)}`;
+
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(18)
+    .fillColor(primaryRed)
+    .text(assocName, pageLeft, headerY + 2, { width: contentW, align: 'center' });
+  doc
+    .font('Helvetica')
+    .fontSize(9)
+    .fillColor('black')
+    .text(assocLine1, pageLeft, headerY + 26, { width: contentW, align: 'center' });
+  doc
+    .font('Helvetica')
+    .fontSize(9)
+    .fillColor('black')
+    .text(assocLine2, pageLeft, headerY + 40, { width: contentW, align: 'center' });
+
+  doc
+    .moveTo(pageLeft, headerY + 66)
+    .lineTo(pageRight, headerY + 66)
+    .lineWidth(1)
+    .stroke(borderColor);
+
+  const entryTitle = `ENTRY FORM For "${safeText(club.clubName)}"`;
+  doc.font('Helvetica-Bold').fontSize(12).fillColor('black');
+  doc.text(entryTitle, pageLeft, headerY + 74, { width: contentW, align: 'center' });
+
+  const titleW = Math.min(contentW - 20, doc.widthOfString(entryTitle));
+  doc
+    .moveTo(pageLeft + contentW / 2 - titleW / 2, headerY + 90)
+    .lineTo(pageLeft + contentW / 2 + titleW / 2, headerY + 90)
+    .lineWidth(1)
+    .stroke(borderColor);
+
+  let y = headerY + 104;
+  const labelX = pageLeft;
+  const labelW = 170;
+  const valueX = labelX + labelW + 10;
+  const valueW = pageRight - valueX;
+  const minRowH = 16;
+
+  const drawField = (label, value) => {
+    const labelText = safeText(label);
+    const valueText = safeText(value);
+
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('black');
+    const labelH = doc.heightOfString(labelText, { width: labelW });
+
+    doc.font('Helvetica').fontSize(9).fillColor('black');
+    const valueH = doc.heightOfString(valueText, { width: valueW });
+
+    const rowH = Math.max(minRowH, labelH, valueH);
+
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('black').text(labelText, labelX, y, { width: labelW });
+    doc.font('Helvetica').fontSize(9).fillColor('black').text(valueText, valueX, y, { width: valueW });
+
+    y += rowH;
   };
 
-  if (registrations.length === 0) {
-    renderPlayersHeader();
-    // Empty state with better styling
-    doc.rect(60, doc.y, doc.page.width - 120, 60).stroke('#e2e8f0');
-    doc.fontSize(12).font('Helvetica').fillColor(secondaryColor)
-       .text('No players registered for this competition yet.', 0, doc.y + 25, { align: 'center' });
-    doc.fillColor('black');
-  } else {
-    // Photo grid layout (4 columns)
-    const cols = 4;
-    const gridLeft = 50; // aligns with previous table left
-    const gridWidth = 500; // fixed width used previously
-    const colW = gridWidth / cols;
-    const padding = 8;
-    const photoSize = Math.min(colW - padding * 2, 110); // square photo area
-    const nameBoxH = 24;
-    const cellH = photoSize + nameBoxH + padding * 2;
+  drawField('Name of Tournament:', competition.competitionName);
+  drawField('Name of Organiser:', club.clubName);
+  drawField('Tournament address:', clubLocation);
+  drawField('Tournament Valid From:', `${formatDateDMY(competition.fromDate)}     To: ${formatDateDMY(competition.toDate)}`);
+  drawField('City:', club.city || '-');
+  drawField('The following Players will represent:', club.clubName);
 
-    // Helper to safely resolve image path from stored relative path
-    const resolveImagePath = (p) => {
-      if (!p) return null;
-      if (/^https?:\/\//i.test(p)) return null; // skip remote URLs for embedding
-      if (path.isAbsolute(p)) return fs.existsSync(p) ? p : null;
-      const abs = path.resolve(__dirname, '../../', p);
-      return fs.existsSync(abs) ? abs : null;
-    };
+  y += 6;
+  doc.moveTo(pageLeft, y).lineTo(pageRight, y).lineWidth(1).stroke(borderColor);
+  y += 10;
 
-    // Ensure header appears on a page with enough room for at least one cell
-    const footerSafeBottom = () => doc.page.height - 100; // keep clear of footer
-    if (doc.y + 25 + 10 + cellH > footerSafeBottom()) {
+  if (entryAgeTitle) {
+    doc.font('Helvetica-Bold').fontSize(12).fillColor('black').text(entryAgeTitle, pageLeft, y, { width: contentW, align: 'center' });
+    y += 18;
+  }
+
+  const tableX = pageLeft;
+  const tableW = contentW;
+  const colW = {
+    sr: 30,
+    name: 190,
+    chest: 60,
+    appr: 100,
+    dob: 70,
+    mem: tableW - (30 + 190 + 60 + 100 + 70),
+  };
+
+  const drawCell = (text, x, y0, w, h, opts = {}) => {
+    doc.rect(x, y0, w, h).lineWidth(0.8).stroke(borderColor);
+    const pad = 4;
+    doc
+      .font(opts.bold ? 'Helvetica-Bold' : 'Helvetica')
+      .fontSize(opts.size || 9)
+      .fillColor('black');
+
+    doc.save();
+    doc
+      .rect(x + pad, y0 + pad, Math.max(0, w - pad * 2), Math.max(0, h - pad * 2))
+      .clip();
+    doc.text(text ?? '', x + pad, y0 + pad, {
+      width: w - pad * 2,
+      align: opts.align || 'left',
+    });
+    doc.restore();
+  };
+
+  const drawTableHeader = () => {
+    const h = 28;
+    let x = tableX;
+    drawCell('Sr\nNo.', x, y, colW.sr, h, { bold: true, align: 'center', size: 9 });
+    x += colW.sr;
+    drawCell("Name of the Player's\n(In Block Letters)", x, y, colW.name, h, { bold: true, align: 'center', size: 9 });
+    x += colW.name;
+    drawCell('Chest No', x, y, colW.chest, h, { bold: true, align: 'center', size: 9 });
+    x += colW.chest;
+    drawCell('Approved / Rejected', x, y, colW.appr, h, { bold: true, align: 'center', size: 9 });
+    x += colW.appr;
+    drawCell('Birth Date', x, y, colW.dob, h, { bold: true, align: 'center', size: 9 });
+    x += colW.dob;
+    drawCell('Membership\nNo.', x, y, colW.mem, h, { bold: true, align: 'center', size: 9 });
+    y += h;
+  };
+
+  drawTableHeader();
+
+  const maxYForRows = () => pageBottom - 230;
+  const minRowHeight = 18;
+  const cellPad = 4;
+
+  registrations.forEach((reg, idx) => {
+    const p = reg.player;
+    const fullName = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ').toUpperCase();
+    const membershipNo = (p.uniqueIdNumber || '').toString().split('/').pop() || p.uniqueIdNumber || '';
+
+    doc.font('Helvetica').fontSize(9);
+    const nameTextH = doc.heightOfString(fullName || '-', { width: colW.name - cellPad * 2 });
+    const rowHeight = Math.max(minRowHeight, nameTextH + cellPad * 2);
+
+    if (y + rowHeight > maxYForRows()) {
       doc.addPage();
+      y = doc.page.margins.top;
+      drawTableHeader();
     }
-    renderPlayersHeader();
 
-    let startY = doc.y;
-    let x = gridLeft;
-    let y = startY;
-    // footerSafeBottom already defined above
+    let x = tableX;
+    drawCell(String(idx + 1), x, y, colW.sr, rowHeight, { align: 'center' });
+    x += colW.sr;
+    drawCell(fullName, x, y, colW.name, rowHeight);
+    x += colW.name;
+    drawCell(String(idx + 1), x, y, colW.chest, rowHeight, { align: 'center' });
+    x += colW.chest;
+    drawCell('Yes/No', x, y, colW.appr, rowHeight, { align: 'center' });
+    x += colW.appr;
+    drawCell(formatDateDMY(p.dateOfBirth), x, y, colW.dob, rowHeight, { align: 'center' });
+    x += colW.dob;
+    drawCell(membershipNo, x, y, colW.mem, rowHeight, { align: 'center' });
+    y += rowHeight;
+  });
 
-    registrations.forEach((reg, idx) => {
-      const player = reg.player;
-      const fullName = [player.firstName, player.middleName, player.lastName].filter(Boolean).join(' ').toUpperCase();
+  y += 10;
+  if (y > pageBottom - 90) {
+    doc.addPage();
+    y = doc.page.margins.top;
+  }
 
-      // Move to next row every 'cols' items
-      if (idx > 0 && idx % cols === 0) {
-        x = gridLeft;
-        y += cellH;
-      }
+  const bottomLabelX = pageLeft;
+  const bottomValueX = pageLeft + 150;
+  const bottomRowH = 14;
+  const drawBottomLine = (label, value) => {
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('black').text(label, bottomLabelX, y);
+    doc.font('Helvetica').fontSize(9).fillColor('black').text(safeText(value), bottomValueX, y);
+    y += bottomRowH;
+  };
 
-      // Pagination check
-      if (y + cellH > footerSafeBottom()) {
-        doc.addPage();
-        // Re-add section header on new page
-        renderPlayersHeader();
+  drawBottomLine('Name of the Captain:', '');
+  drawBottomLine('Name of the Manager:', '');
+  drawBottomLine('Name of the Coach:', '');
 
-        // Reset grid position for new page
-        y = doc.y;
-        x = gridLeft;
-      }
+  y += 6;
+  const note =
+    'We certify that the above mentioned players are bonafide players of the District / Club are eligible to participate in the said Championship. The chest numbers given above to the players will not be changed without prior permission of the Technical Committee of MAHARASHTRA KABADDI ASSOCIATION. We certify that the age certificates registration forms of the participants to the Association have been verified and found correct. In the event of any wrong information we shall be held responsible and the player whose certificate found defective will be disqualified from the Championship.';
+  doc.font('Helvetica').fontSize(8).fillColor('black').text(note, pageLeft, y, { width: contentW, align: 'justify' });
 
-      // Cell border
-      doc.rect(x, y, colW, cellH).stroke('#94a3b8');
-
-      // Photo frame
-      const imgX = x + padding;
-      const imgY = y + padding;
-      doc.rect(imgX, imgY, photoSize, photoSize).stroke('#cbd5e1');
-
-      const imgPath = resolveImagePath(player.profileImage);
-      if (imgPath) {
-        try {
-          // Fit image within the square while preserving aspect ratio
-          doc.image(imgPath, imgX, imgY, { fit: [photoSize, photoSize] });
-        } catch (_) {
-          // If image fails to load, fall back to placeholder
-          doc.fontSize(8).fillColor(secondaryColor)
-            .text('PHOTO ERROR', imgX, imgY + photoSize / 2 - 5, { width: photoSize, align: 'center' })
-            .fillColor('black');
-        }
-      } else {
-        // Placeholder when no image
-        doc.fontSize(8).fillColor(secondaryColor)
-          .text('NO PHOTO', imgX, imgY + photoSize / 2 - 5, { width: photoSize, align: 'center' })
-          .fillColor('black');
-      }
-
-      // Name label
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('black')
-        .text(fullName || 'UNKNOWN', x + 2, imgY + photoSize + 6, { width: colW - 4, align: 'center' });
-
-      // Advance to next column
-      x += colW;
+  {
+    const clubNameUpper = String(club.clubName || '').toUpperCase();
+    const midTitleY = pageBottom - 120;
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('black').text(clubNameUpper || '-', pageLeft, midTitleY, {
+      width: contentW,
+      align: 'center',
     });
 
-    // Signature/association area shown after the images (once, after grid)
-    const signAreaHeight = 60;
-    const minGapBelowGrid = 12; // ensure a small gap from the grid
-    const footerTop = doc.page.height - 60; // footer rectangle starts here
-    const bottomGap = 10; // gap above footer
-    const desiredBottomY = footerTop - bottomGap - signAreaHeight; // sit just above footer
-    let signY;
-    if (desiredBottomY < y + cellH + minGapBelowGrid) {
-      // Not enough room at the bottom under the grid; move to a fresh page
-      doc.addPage();
-      // Do NOT render players header here; this is not a new grid page
-      signY = doc.y + 20;
-    } else {
-      // Anchor to bottom safely above footer
-      signY = desiredBottomY;
-    }
-    // Layout constants for left/right alignment within content area
-    const contentLeft = 50; // align with left content
-    const contentWidth = doc.page.width - 100; // symmetric margins (50 each side)
-
-    // Left-aligned small label
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('black')
-      .text('seal of the association', contentLeft, signY, { width: contentWidth, align: 'left' });
-    // Right-aligned role above association name
-    doc.fontSize(10).font('Helvetica')
-      .text('secretary', contentLeft, signY, { width: contentWidth, align: 'right' });
-    // Association name under 'secretary' (right-aligned)
-    doc.fontSize(11).font('Helvetica-Bold')
-      .text('THANE JILHA KABADDI ASSOCIATION THANE GRAMIN', contentLeft, signY + 18, { width: contentWidth, align: 'right' });
+    const footerY1 = pageBottom - 56;
+    const footerY2 = pageBottom - 42;
+    doc.font('Helvetica').fontSize(8).fillColor('black').text('seal of the association', pageLeft, footerY1);
+    doc.font('Helvetica').fontSize(8).fillColor('black').text('secretary', pageLeft, footerY1, { width: contentW, align: 'center' });
+    doc.font('Helvetica').fontSize(8).fillColor('black').text(clubNameUpper || '-', pageLeft, footerY2, { width: contentW, align: 'center' });
   }
-  // Summary removed per request
 
-  // Footer with better styling
-  const footerY = doc.page.height - 60;
-  doc.rect(40, footerY, doc.page.width - 80, 40).fill('#f8fafc').stroke('#e2e8f0');
-  
-  doc.fontSize(8).font('Helvetica').fillColor(secondaryColor);
-  doc.text('TDKA Competition Management System', 50, footerY + 8);
-  doc.text(`Generated on: ${new Date().toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })}`, 50, footerY + 20);
-  
-  // Page number removed (multi-page safe)
+  const resolveLocalImagePath = (p) => {
+    if (!p) return null;
+    if (/^https?:\/\//i.test(p)) return null;
+    try {
+      if (path.isAbsolute(p)) return fs.existsSync(p) ? p : null;
+    } catch (_) {
+      return null;
+    }
 
-  // Finalize PDF
+    const candidates = [
+      path.resolve(process.cwd(), p),
+      path.resolve(process.cwd(), 'backend', p),
+      path.resolve(__dirname, '../../..', p),
+      path.resolve(__dirname, '../../..', 'backend', p),
+    ];
+
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch (_) {
+        // ignore
+      }
+    }
+    return null;
+  };
+
+  doc.addPage();
+
+  const drawPlayersPageHeader = () => {
+    const topY = doc.page.margins.top;
+
+    if (logoPath) {
+      try {
+        doc.image(logoPath, pageLeft, topY, { fit: [logoSize, logoSize] });
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(18)
+      .fillColor(primaryRed)
+      .text(assocName, pageLeft, topY + 2, { width: contentW, align: 'center' });
+    doc
+      .font('Helvetica')
+      .fontSize(9)
+      .fillColor('black')
+      .text(assocLine1, pageLeft, topY + 26, { width: contentW, align: 'center' });
+    doc
+      .font('Helvetica')
+      .fontSize(9)
+      .fillColor('black')
+      .text(assocLine2, pageLeft, topY + 40, { width: contentW, align: 'center' });
+
+    doc.moveTo(pageLeft, topY + 66).lineTo(pageRight, topY + 66).lineWidth(1).stroke(borderColor);
+
+    return topY + 78;
+  };
+
+  const drawPlayersPageFooter = () => {
+    const footerY1 = pageBottom - 56;
+    const footerY2 = pageBottom - 42;
+
+    doc.font('Helvetica').fontSize(8).fillColor('black').text('seal of the association', pageLeft, footerY1);
+    doc.font('Helvetica').fontSize(8).fillColor('black').text('secretary', pageLeft, footerY1, { width: contentW, align: 'center' });
+    doc
+      .font('Helvetica')
+      .fontSize(8)
+      .fillColor('black')
+      .text(String(club.clubName || '').toUpperCase(), pageLeft, footerY2, { width: contentW, align: 'center' });
+  };
+
+  const renderPlayersGrid = () => {
+    let gridTop = drawPlayersPageHeader();
+    const cols = 4;
+    const cellW = contentW / cols;
+    const cellH = 148;
+    const photoBox = 92;
+    const footerReserve = 80;
+
+    const rowsPerPage = Math.max(1, Math.floor((pageBottom - footerReserve - gridTop) / cellH));
+    const perPage = rowsPerPage * cols;
+
+    const totalCells = Math.ceil(registrations.length / cols) * cols;
+
+    for (let idx = 0; idx < totalCells; idx++) {
+      const posInPage = idx % perPage;
+      if (idx > 0 && posInPage === 0) {
+        drawPlayersPageFooter();
+        doc.addPage();
+        gridTop = drawPlayersPageHeader();
+      }
+
+      const row = Math.floor(posInPage / cols);
+      const col = posInPage % cols;
+      const x0 = pageLeft + col * cellW;
+      const y0 = gridTop + row * cellH;
+
+      doc.rect(x0, y0, cellW, cellH).lineWidth(0.8).stroke(borderColor);
+
+      const reg = registrations[idx];
+      if (!reg?.player) continue;
+
+      const p = reg.player;
+      const fullName = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ').toUpperCase();
+
+      const imgPath = resolveLocalImagePath(p.profileImage);
+      const imageToUse = imgPath || logoPath;
+
+      const imgX = x0 + (cellW - photoBox) / 2;
+      const imgY = y0 + 10;
+
+      if (imageToUse) {
+        try {
+          doc.image(imageToUse, imgX + 4, imgY + 4, {
+            fit: [photoBox - 8, photoBox - 8],
+            align: 'center',
+            valign: 'center',
+          });
+        } catch (_) {
+          doc
+            .font('Helvetica')
+            .fontSize(7)
+            .fillColor('black')
+            .text('PHOTO', imgX, imgY + photoBox / 2 - 4, { width: photoBox, align: 'center' });
+        }
+      }
+
+      doc
+        .font('Helvetica')
+        .fontSize(7)
+        .fillColor('black')
+        .text(fullName || '-', x0 + 6, imgY + photoBox + 10, { width: cellW - 12, align: 'center' });
+    }
+
+    drawPlayersPageFooter();
+  };
+
+  renderPlayersGrid();
+
   doc.end();
 });
 
@@ -1525,6 +1657,7 @@ const getClubPlayersInCompetition = asyncHandler(async (req, res) => {
         select: {
           id: true,
           uniqueIdNumber: true,
+          profileImage: true,
           firstName: true,
           middleName: true,
           lastName: true,
@@ -1549,6 +1682,7 @@ const getClubPlayersInCompetition = asyncHandler(async (req, res) => {
       id: reg.player.id,
       name: `${reg.player.firstName} ${reg.player.middleName ? reg.player.middleName + ' ' : ''}${reg.player.lastName}`,
       uniqueIdNumber: reg.player.uniqueIdNumber,
+      profileImage: reg.player.profileImage,
       position: reg.player.position,
       mobile: reg.player.mobile,
       age: new Date().getFullYear() - new Date(reg.player.dateOfBirth).getFullYear(),
