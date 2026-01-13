@@ -1325,6 +1325,12 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
 
   const resolveMeritCertificateTemplatePath = () => {
     const candidates = [
+      path.resolve(__dirname, '..', '..', '..', 'assets', 'merit-certificate-template.jpg'),
+      path.resolve(__dirname, '..', '..', '..', 'assets', 'merit-certificate-template.jpeg'),
+      path.resolve(__dirname, '..', '..', '..', 'assets', 'merit-certificate-template.png'),
+      path.resolve(process.cwd(), 'assets', 'merit-certificate-template.jpg'),
+      path.resolve(process.cwd(), 'assets', 'merit-certificate-template.jpeg'),
+      path.resolve(process.cwd(), 'assets', 'merit-certificate-template.png'),
       path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.jpg'),
       path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.jpeg'),
       path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.png'),
@@ -2467,7 +2473,7 @@ const generateMeritCertificatePDF = asyncHandler(async (req, res) => {
   });
 
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="Merit_Certificate_${safeName}.pdf"`);
+  res.setHeader('Content-Disposition', `inline; filename="Merit_Certificate_${safeName}.pdf"`);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -2583,6 +2589,18 @@ const generateMeritCertificatePDF = asyncHandler(async (req, res) => {
 
   const resolveMeritCertificateTemplatePath = () => {
     const candidates = [
+      path.resolve(__dirname, '..', '..', 'assets', 'merit-certificate-template.jpg'),
+      path.resolve(__dirname, '..', '..', 'assets', 'merit-certificate-template.jpeg'),
+      path.resolve(__dirname, '..', '..', 'assets', 'merit-certificate-template.png'),
+      path.resolve(__dirname, '..', '..', '..', 'assets', 'merit-certificate-template.jpg'),
+      path.resolve(__dirname, '..', '..', '..', 'assets', 'merit-certificate-template.jpeg'),
+      path.resolve(__dirname, '..', '..', '..', 'assets', 'merit-certificate-template.png'),
+      path.resolve(process.cwd(), 'assets', 'merit-certificate-template.jpg'),
+      path.resolve(process.cwd(), 'assets', 'merit-certificate-template.jpeg'),
+      path.resolve(process.cwd(), 'assets', 'merit-certificate-template.png'),
+      path.resolve(process.cwd(), 'backend', 'assets', 'merit-certificate-template.jpg'),
+      path.resolve(process.cwd(), 'backend', 'assets', 'merit-certificate-template.jpeg'),
+      path.resolve(process.cwd(), 'backend', 'assets', 'merit-certificate-template.png'),
       path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.jpg'),
       path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.jpeg'),
       path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.png'),
@@ -2602,6 +2620,7 @@ const generateMeritCertificatePDF = asyncHandler(async (req, res) => {
   };
 
   const templatePath = resolveMeritCertificateTemplatePath();
+  res.setHeader('X-Merit-Template', templatePath ? '1' : '0');
   if (templatePath) {
     try {
       doc.image(templatePath, 0, 0, { width: pageW, height: pageH });

@@ -11,11 +11,52 @@ module.exports = async (req, res, next) => {
   }
   try {
     const decoded = jwt.verify(token, secret);
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-    });
-    if (!user) {
-      return next(createError(401, "Unauthorized"));
+    let user = null;
+
+    if (decoded?.isClub) {
+      const club = await prisma.club.findUnique({
+        where: { id: decoded.userId },
+        select: { id: true, clubName: true, email: true },
+      });
+
+      if (!club) {
+        return next(createError(401, "Unauthorized"));
+      }
+
+      user = {
+        id: club.id,
+        name: club.clubName,
+        email: club.email,
+        role: "CLUB",
+        active: true,
+        clubId: club.id,
+      };
+    } else {
+      user = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+      });
+      if (!user) {
+        return next(createError(401, "Unauthorized"));
+      }
+    }
+
+    if (typeof user.role === "string" && user.role.toLowerCase() === "clubadmin" && !user.clubId) {
+      const club = await prisma.club.findFirst({
+        where: { email: user.email },
+        select: { id: true },
+      });
+
+      if (club?.id) {
+        const updated = await prisma.user.update({
+          where: { id: user.id },
+          data: { clubId: club.id },
+        });
+        user.clubId = updated.clubId;
+      }
+    }
+
+    if (typeof user.role === "string" && user.role.toLowerCase() === "clubadmin" && !user.clubId) {
+      return next(createError(403, "Club admin is not linked to any club"));
     }
 
     // Check membership expiry for members
