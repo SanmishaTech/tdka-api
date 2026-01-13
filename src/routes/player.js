@@ -22,6 +22,22 @@ const playerImageUpload = createUploadMiddleware(
   ]
 );
 
+const aadharVerifyUpload = createUploadMiddleware(
+  "players",
+  [
+    {
+      name: "aadharImage",
+      allowedTypes: ["image/jpeg", "image/jpg", "image/png"],
+      maxSize: 2 * 1024 * 1024,
+    },
+    {
+      name: "file",
+      allowedTypes: ["image/jpeg", "image/jpg", "image/png"],
+      maxSize: 2 * 1024 * 1024,
+    },
+  ]
+);
+
 /**
  * @swagger
  * tags:
@@ -204,9 +220,9 @@ router.get("/", auth, playerController.getPlayers);
  */
 // Aadhaar verification routes (Smart OCR)
 // Without playerId – client uploads Aadhaar image and number; useful before creating player
-router.post("/verify-aadhar", auth, ...playerImageUpload, playerController.verifyAadharOCR);
+router.post("/verify-aadhar", auth, ...aadharVerifyUpload, playerController.verifyAadharOCR);
 // With playerId – server can use stored image; optional file upload to re-verify
-router.post("/:id/verify-aadhar", auth, ...playerImageUpload, playerController.verifyAadharOCR);
+router.post("/:id/verify-aadhar", auth, ...aadharVerifyUpload, playerController.verifyAadharOCR);
 
 router.get("/:id/icard/pdf", auth, playerController.generatePlayerICardPDF);
 

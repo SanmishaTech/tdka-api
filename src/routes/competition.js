@@ -236,6 +236,7 @@ router.delete("/:id/leave", auth, competitionController.leaveCompetition);
 router.get("/:id/eligible-players", auth, competitionController.getEligiblePlayers);
 router.post("/:id/add-players", auth, competitionController.addPlayersToCompetition);
 router.get("/:id/registered-players", auth, competitionController.getRegisteredPlayers);
+router.get("/:id/players/:playerId/merit-certificate", auth, competitionController.generateMeritCertificatePDF);
 router.delete("/:id/players/:playerId", auth, competitionController.removePlayerFromCompetition);
 
 // Assign an observer to a competition (one per competition)

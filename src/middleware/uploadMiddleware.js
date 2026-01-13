@@ -1,6 +1,6 @@
 const multer = require("multer");
 const path = require("path");
-const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
 const fsPromises = require("fs").promises;
 const fs = require("fs"); // For sync operations
 
@@ -30,7 +30,7 @@ const createUploadMiddleware = (moduleName, fields, uploadDir = "uploads") => {
       // Get the field name (e.g., profilePicture1)
       const fieldName = file.fieldname;
       // Generate a UUID for this upload
-      const uuid = uuidv4();
+      const uuid = crypto.randomUUID();
       // Store the UUID on the request for later use
       req.fileUUID = req.fileUUID || {};
       req.fileUUID[fieldName] = uuid;
@@ -396,7 +396,7 @@ const createUploadMiddleware = (moduleName, fields, uploadDir = "uploads") => {
   return [
     // 1. Initial Setup Middleware (Synchronous)
     (req, res, next) => {
-      req.uploadUUID = uuidv4(); // Unique ID for this request's uploads
+      req.uploadUUID = crypto.randomUUID(); // Unique ID for this request's uploads
       req.uploadModuleName = moduleName; // Store moduleName for destination/cleanup
       // Base path is no longer a single directory, cleanup targets based on module/field/uuid
       // req.uploadBasePath = path.join(uploadDir, req.uploadUUID); // REMOVED

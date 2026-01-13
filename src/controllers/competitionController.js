@@ -71,6 +71,18 @@ const parseEligibilityDate = (value) => {
   return null;
 };
 
+// Helper: calculate age on a reference date (defaults to today)
+const calculateAgeOn = (dob, refDate = new Date()) => {
+  if (!dob) return null;
+  const birth = dob instanceof Date ? dob : new Date(dob);
+  if (isNaN(birth)) return null;
+  const ref = refDate instanceof Date ? refDate : new Date(refDate);
+  if (isNaN(ref)) return null;
+  let age = ref.getFullYear() - birth.getFullYear();
+  const m = ref.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && ref.getDate() < birth.getDate())) age--;
+  return age;
+};
 // Helper: compute "Under X" label from an eligibility date (DOB cutoff)
 const computeUnderAgeLabel = (eligibilityDate, asOf = new Date()) => {
   const dob = parseEligibilityDate(eligibilityDate);
@@ -193,6 +205,7 @@ const getCompetitions = asyncHandler(async (req, res) => {
       age: ageLabel,
       lastEntryDate: comp.lastEntryDate,
       ageEligibilityDate: comp.ageEligibilityDate,
+      weight: comp.weight,
       rules: comp.rules,
       createdAt: comp.createdAt,
       updatedAt: comp.updatedAt,
@@ -321,6 +334,7 @@ const getCompetition = asyncHandler(async (req, res) => {
     age: computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age,
     lastEntryDate: competition.lastEntryDate,
     ageEligibilityDate: competition.ageEligibilityDate,
+    weight: competition.weight,
     rules: competition.rules,
     createdAt: competition.createdAt,
     updatedAt: competition.updatedAt,
@@ -344,6 +358,7 @@ const createCompetition = asyncHandler(async (req, res) => {
     clubs: z.array(z.string()).optional(),
     lastEntryDate: z.string().min(1, "Last entry date is required").max(255),
     ageEligibilityDate: z.string().min(1, "Age eligibility date is required").max(255).optional(),
+    weight: z.string().max(255).optional(),
     rules: z.string().optional(),
   });
 
@@ -352,6 +367,12 @@ const createCompetition = asyncHandler(async (req, res) => {
 
   // Extract groups and clubs for separate handling
   const { groups, clubs, ...competitionData } = validatedData;
+
+  const normalizedCompetitionData = { ...competitionData };
+  if (typeof normalizedCompetitionData.weight === "string") {
+    const w = normalizedCompetitionData.weight.trim();
+    normalizedCompetitionData.weight = w.length > 0 ? w : null;
+  }
   
   // Prefer computing age label from eligibility date; fallback to first group's age
   let age = computeUnderAgeLabel(competitionData.ageEligibilityDate) || "Multiple groups";
@@ -374,7 +395,7 @@ const createCompetition = asyncHandler(async (req, res) => {
   // Create the competition with the groups and clubs relationships
   const competition = await prisma.competition.create({ 
     data: {
-      ...competitionData,
+      ...normalizedCompetitionData,
       age: age,
       groups: {
         connect: groups.map(groupId => ({ id: parseInt(groupId) }))
@@ -412,6 +433,7 @@ const schema = z
       clubs: z.array(z.string()).optional(),
       lastEntryDate: z.string().min(1).max(255).optional(),
       ageEligibilityDate: z.string().min(1).max(255).optional(),
+      weight: z.string().max(255).optional(),
       rules: z.string().optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
@@ -432,6 +454,11 @@ const schema = z
   
   // Update data object for Prisma
   const updateData = { ...competitionData };
+
+  if (Object.prototype.hasOwnProperty.call(competitionData, "weight") && typeof competitionData.weight === "string") {
+    const w = competitionData.weight.trim();
+    updateData.weight = w.length > 0 ? w : null;
+  }
 
   // If an eligibility date is provided, prefer computing the age label from it
   const ageFromEligibility = computeUnderAgeLabel(competitionData.ageEligibilityDate);
@@ -599,7 +626,13 @@ const joinCompetition = asyncHandler(async (req, res) => {
   const competition = await prisma.competition.findUnique({
     where: { id: competitionId },
     include: {
-      clubs: true
+      clubs: true,
+      groups: {
+        select: {
+          id: true,
+          groupName: true
+        }
+      }
     }
   });
 
@@ -737,7 +770,13 @@ const getEligiblePlayers = asyncHandler(async (req, res) => {
   const competition = await prisma.competition.findUnique({
     where: { id: competitionId },
     include: {
-      clubs: true
+      clubs: true,
+      groups: {
+        select: {
+          id: true,
+          groupName: true,
+        },
+      },
     }
   });
 
@@ -769,9 +808,19 @@ const getEligiblePlayers = asyncHandler(async (req, res) => {
     ]
   });
 
+  const eligibilityCutoff = parseEligibilityDate(competition.ageEligibilityDate);
+  const eligiblePlayers = eligibilityCutoff
+    ? players.filter((p) => {
+      if (!p?.dateOfBirth) return false;
+      const dob = p.dateOfBirth instanceof Date ? p.dateOfBirth : new Date(p.dateOfBirth);
+      if (isNaN(dob)) return false;
+      return dob >= eligibilityCutoff;
+    })
+    : players;
+
   res.json({
-    players,
-    totalPlayers: players.length,
+    players: eligiblePlayers,
+    totalPlayers: eligiblePlayers.length,
   });
 });
 
@@ -812,7 +861,13 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
   const competition = await prisma.competition.findUnique({
     where: { id: competitionId },
     include: {
-      clubs: true
+      clubs: true,
+      groups: {
+        select: {
+          id: true,
+          groupName: true,
+        },
+      },
     }
   });
 
@@ -828,6 +883,13 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
   if (playerIds.length > competition.maxPlayers) {
     throw createError(400, `Maximum ${competition.maxPlayers} players allowed`);
   }
+  const today = new Date();
+
+  // Determine senior competition status (>30 derived from eligibility date)
+  const refDate = parseEligibilityDate(competition.ageEligibilityDate) || today;
+  const seniorAge = calculateAgeOn(refDate, today);
+  const isSeniorCompetition = seniorAge !== null && seniorAge > 30;
+  const under18Cutoff = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
 
   // Verify all players belong to the club
   const players = await prisma.player.findMany({
@@ -840,6 +902,67 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
 
   if (players.length !== playerIds.length) {
     throw createError(400, "Some players are not valid or don't belong to your club");
+  }
+
+  // Enforce competition age eligibility date as a DOB cutoff (players must be born on/after cutoff)
+  const eligibilityCutoff = parseEligibilityDate(competition.ageEligibilityDate);
+  if (eligibilityCutoff) {
+    const ineligible = players.filter((p) => {
+      if (!p?.dateOfBirth) return false;
+      const dob = p.dateOfBirth instanceof Date ? p.dateOfBirth : new Date(p.dateOfBirth);
+      if (isNaN(dob)) return false;
+      return dob < eligibilityCutoff;
+    });
+
+    if (ineligible.length > 0) {
+      throw createError(
+        400,
+        `Some players are not eligible for this competition based on the age eligibility date (${ineligible.length} player(s))`
+      );
+    }
+  }
+
+  // Enforce U18 rules for senior competitions
+  if (isSeniorCompetition) {
+    const hasMenOrWomenGroupSelected = Array.isArray(competition.groups)
+      ? competition.groups.some(g => {
+        const name = String(g?.groupName || "").trim().toLowerCase();
+        return name === "men" || name === "women";
+      })
+      : false;
+    const allowU18Extras = hasMenOrWomenGroupSelected;
+
+    // Count existing U18 registrations for this club in this competition
+    const existingU18Count = await prisma.competitionRegistration.count({
+      where: {
+        competitionId,
+        clubId: userClubId,
+        player: {
+          dateOfBirth: {
+            gte: under18Cutoff // born on/after cutoff => age 18 or younger
+          }
+        }
+      }
+    });
+
+    const incomingU18 = players.filter(p => {
+      const age = calculateAgeOn(p.dateOfBirth, today);
+      return age !== null && age <= 18;
+    }).length;
+
+    if (!allowU18Extras) {
+      if (incomingU18 > 0) {
+        throw createError(400, "U18 (age 18 or below) players are not allowed for this competition");
+      }
+    } else {
+      const totalU18 = existingU18Count + incomingU18;
+      if (totalU18 > 3) {
+        const remaining = Math.max(0, 3 - existingU18Count);
+        throw createError(400, remaining === 0
+          ? "Maximum 3 U18 (age 18 or below) players already registered for this competition"
+          : `You can register only ${remaining} more U18 (age 18 or below) player(s) for this competition (max 3)`);
+      }
+    }
   }
 
   // Create registration records for each player
@@ -984,7 +1107,9 @@ const getRegisteredPlayers = asyncHandler(async (req, res) => {
         select: {
           id: true,
           competitionName: true,
-          maxPlayers: true
+          maxPlayers: true,
+          ageEligibilityDate: true,
+          weight: true
         }
       }
     },
@@ -1003,7 +1128,8 @@ const getRegisteredPlayers = asyncHandler(async (req, res) => {
         name: `${reg.player.firstName} ${reg.player.lastName}`,
         uniqueIdNumber: reg.player.uniqueIdNumber,
         position: reg.player.position,
-        age: new Date().getFullYear() - new Date(reg.player.dateOfBirth).getFullYear()
+        dateOfBirth: reg.player.dateOfBirth,
+        age: calculateAgeOn(reg.player.dateOfBirth) ?? 0
       }
     })),
     totalRegistrations: registrations.length,
@@ -1105,6 +1231,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
       toDate: true,
       age: true,
       ageEligibilityDate: true,
+      weight: true,
       maxPlayers: true,
       lastEntryDate: true
     }
@@ -1194,6 +1321,26 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     } catch (error) {
       return dateString;
     }
+  };
+
+  const resolveMeritCertificateTemplatePath = () => {
+    const candidates = [
+      path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.jpg'),
+      path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.jpeg'),
+      path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.png'),
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'merit-certificate-template.jpg'),
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'merit-certificate-template.jpeg'),
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'merit-certificate-template.png'),
+      path.resolve(__dirname, '../../..', 'backend', 'uploads', 'players', 'profileImage', '270e56b1-67a4-4fb6-91bb-f15a995bc701', 'Certificate-1.jpeg'),
+    ];
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch (_) {
+        // ignore
+      }
+    }
+    return null;
   };
 
   // Helper function to calculate age
@@ -1695,7 +1842,7 @@ const getClubPlayersInCompetition = asyncHandler(async (req, res) => {
       profileImage: reg.player.profileImage,
       position: reg.player.position,
       mobile: reg.player.mobile,
-      age: new Date().getFullYear() - new Date(reg.player.dateOfBirth).getFullYear(),
+      age: calculateAgeOn(reg.player.dateOfBirth) ?? 0,
       aadharVerified: reg.player.aadharVerified
     }
   }));
@@ -1725,6 +1872,7 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
       toDate: true,
       age: true,
       ageEligibilityDate: true,
+      weight: true,
       lastEntryDate: true,
       clubs: {
         select: {
@@ -2216,6 +2364,522 @@ const updateRefereeForCompetition = asyncHandler(async (req, res) => {
   });
 });
 
+const generateMeritCertificatePDF = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  const playerId = parseInt(req.params.playerId);
+
+  if (!competitionId || !playerId) {
+    throw createError(400, "Invalid competition ID or player ID");
+  }
+
+  let userClubId = null;
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin",
+        },
+        select: { clubId: true },
+      });
+      if (clubAdminUser?.clubId) {
+        userClubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!userClubId) {
+    return res.status(403).json({ errors: { message: "Access denied" } });
+  }
+
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
+    select: {
+      id: true,
+      competitionName: true,
+      fromDate: true,
+      toDate: true,
+      age: true,
+      ageEligibilityDate: true,
+      weight: true,
+    },
+  });
+
+  if (!competition) {
+    throw createError(404, "Competition not found");
+  }
+
+  const endDate = parseEligibilityDate(competition.toDate);
+  if (endDate) {
+    endDate.setHours(23, 59, 59, 999);
+  }
+
+  if (endDate && new Date() <= endDate) {
+    throw createError(400, "Merit certificate is available only after the competition period is over");
+  }
+
+  const registration = await prisma.competitionRegistration.findFirst({
+    where: {
+      competitionId: competitionId,
+      clubId: userClubId,
+      playerId: playerId,
+    },
+    include: {
+      player: {
+        select: {
+          id: true,
+          uniqueIdNumber: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          dateOfBirth: true,
+          profileImage: true,
+        },
+      },
+    },
+  });
+
+  if (!registration?.player) {
+    throw createError(404, "Player is not registered for this competition");
+  }
+
+  const club = await prisma.club.findUnique({
+    where: { id: userClubId },
+    select: { id: true, clubName: true, city: true },
+  });
+
+  const player = registration.player;
+  const playerName = [player.firstName, player.middleName, player.lastName].filter(Boolean).join(" ").trim();
+  const safeName = String(playerName || "player").replace(/[^a-z0-9_-]+/gi, "_");
+
+  const doc = new PDFDocument({
+    margin: 30,
+    size: 'A4',
+    layout: 'landscape',
+    info: {
+      Title: `Merit Certificate - ${playerName} - ${competition.competitionName}`,
+      Author: 'TDKA Competition Management System',
+      Subject: 'Merit Certificate',
+    },
+  });
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Merit_Certificate_${safeName}.pdf"`);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  doc.pipe(res);
+
+  const pageW = doc.page.width;
+  const pageH = doc.page.height;
+  const left = doc.page.margins.left;
+  const top = doc.page.margins.top;
+  const right = pageW - doc.page.margins.right;
+  const bottom = pageH - doc.page.margins.bottom;
+  const contentW = right - left;
+
+  const formatDateDMY = (d) => {
+    if (!d) return '-';
+    try {
+      const dt = new Date(d);
+      const dd = String(dt.getDate()).padStart(2, '0');
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const yyyy = String(dt.getFullYear());
+      return `${dd}-${mm}-${yyyy}`;
+    } catch (_) {
+      return '-';
+    }
+  };
+
+  const resolveTDKALogoPath = () => {
+    const candidates = [
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'TDKA logo.png'),
+      path.resolve(__dirname, '../../..', 'frontend', 'dist', 'TDKA logo.png'),
+      path.resolve(process.cwd(), 'frontend', 'public', 'TDKA logo.png'),
+      path.resolve(process.cwd(), 'frontend', 'dist', 'TDKA logo.png'),
+    ];
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch (_) {
+        // ignore
+      }
+    }
+    return null;
+  };
+
+  const resolveLocalImagePath = (p) => {
+    if (!p) return null;
+    const raw = String(p).trim();
+    const uploadsRoot = path.resolve(__dirname, '..', '..', 'uploads');
+
+    const mapUploadsPath = (maybePath) => {
+      if (!maybePath) return null;
+      const s = String(maybePath).trim();
+      const normalized = s.replace(/\\/g, '/');
+      const idx = normalized.toLowerCase().indexOf('/uploads/');
+      if (idx >= 0) {
+        const rel = normalized.slice(idx + '/uploads/'.length);
+        const abs = path.resolve(uploadsRoot, rel);
+        try {
+          return fs.existsSync(abs) ? abs : null;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      if (/^uploads\//i.test(normalized)) {
+        const rel = normalized.replace(/^uploads\//i, '');
+        const abs = path.resolve(uploadsRoot, rel);
+        try {
+          return fs.existsSync(abs) ? abs : null;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      return null;
+    };
+
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        const url = new URL(raw);
+        const mapped = mapUploadsPath(url.pathname);
+        if (mapped) return mapped;
+      } catch (_) {
+        // ignore
+      }
+      return null;
+    }
+
+    // Map URL-like uploads paths to local uploads folder (important on Windows where /uploads/... is treated as absolute)
+    const mapped = mapUploadsPath(raw);
+    if (mapped) return mapped;
+
+    try {
+      if (path.isAbsolute(raw)) return fs.existsSync(raw) ? raw : null;
+    } catch (_) {
+      return null;
+    }
+    const candidates = [
+      path.resolve(process.cwd(), raw),
+      path.resolve(process.cwd(), 'backend', raw),
+      path.resolve(__dirname, '../../..', raw),
+      path.resolve(__dirname, '../../..', 'backend', raw),
+    ];
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch (_) {
+        // ignore
+      }
+    }
+    return null;
+  };
+
+  const resolveMeritCertificateTemplatePath = () => {
+    const candidates = [
+      path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.jpg'),
+      path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.jpeg'),
+      path.resolve(__dirname, '../../..', 'backend', 'assets', 'merit-certificate-template.png'),
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'merit-certificate-template.jpg'),
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'merit-certificate-template.jpeg'),
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'merit-certificate-template.png'),
+      path.resolve(__dirname, '../../..', 'backend', 'uploads', 'players', 'profileImage', '270e56b1-67a4-4fb6-91bb-f15a995bc701', 'Certificate-1.jpeg'),
+    ];
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch (_) {
+        // ignore
+      }
+    }
+    return null;
+  };
+
+  const templatePath = resolveMeritCertificateTemplatePath();
+  if (templatePath) {
+    try {
+      doc.image(templatePath, 0, 0, { width: pageW, height: pageH });
+    } catch (_) {
+      // ignore
+    }
+
+    const parseNum = (v) => {
+      if (v === undefined || v === null) return null;
+      const n = Number(String(v).trim());
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const toAbs = (n, base) => {
+      if (n === null || n === undefined) return null;
+      return n <= 1 ? n * base : n;
+    };
+
+    const layout = {
+      photo: {
+        x: 0.80,
+        y: 0.195,
+        w: 0.15,
+        h: 0.24,  
+        inset: -5,
+      },
+      name: {
+        x: 0.24,
+        y: 0.61,
+        w: 0.62,
+        fontSize: 13,
+      },
+      club: {
+        x: 0.72,
+        y: 0.613,
+        w: 0.62,
+        fontSize: 12,
+      },
+      dobDay: {
+        x: 0.566,
+        y: 0.613,
+        w: 0.05,
+        fontSize: 12,
+      },
+      dobMonth: {
+        x: 0.60,
+        y: 0.613,
+        w: 0.05,
+        fontSize: 12,
+      },
+      dobYear: {
+        x: 0.635,
+        y: 0.613,
+        w: 0.08,
+        fontSize: 12,
+      },
+    };
+
+    {
+      const q = req.query || {};
+      const px = toAbs(parseNum(q.photoX), pageW);
+      const py = toAbs(parseNum(q.photoY), pageH);
+      const pw = toAbs(parseNum(q.photoW), pageW);
+      const ph = toAbs(parseNum(q.photoH), pageH);
+      const pi = parseNum(q.photoInset);
+      const nx = toAbs(parseNum(q.nameX), pageW);
+      const ny = toAbs(parseNum(q.nameY), pageH);
+      const nw = toAbs(parseNum(q.nameW), pageW);
+      const nf = parseNum(q.nameFontSize);
+      const cx = toAbs(parseNum(q.clubX), pageW);
+      const cy = toAbs(parseNum(q.clubY), pageH);
+      const cw = toAbs(parseNum(q.clubW), pageW);
+      const cf = parseNum(q.clubFontSize);
+      const ddx = toAbs(parseNum(q.dobDayX), pageW);
+      const ddy = toAbs(parseNum(q.dobDayY), pageH);
+      const ddw = toAbs(parseNum(q.dobDayW), pageW);
+      const ddf = parseNum(q.dobDayFontSize);
+      const dmx = toAbs(parseNum(q.dobMonthX), pageW);
+      const dmy = toAbs(parseNum(q.dobMonthY), pageH);
+      const dmw = toAbs(parseNum(q.dobMonthW), pageW);
+      const dmf = parseNum(q.dobMonthFontSize);
+      const dyx = toAbs(parseNum(q.dobYearX), pageW);
+      const dyy = toAbs(parseNum(q.dobYearY), pageH);
+      const dyw = toAbs(parseNum(q.dobYearW), pageW);
+      const dyf = parseNum(q.dobYearFontSize);
+
+      if (px !== null) layout.photo.x = px / pageW;
+      if (py !== null) layout.photo.y = py / pageH;
+      if (pw !== null) layout.photo.w = pw / pageW;
+      if (ph !== null) layout.photo.h = ph / pageH;
+      if (pi !== null) layout.photo.inset = Math.max(0, Math.floor(pi));
+      if (nx !== null) layout.name.x = nx / pageW;
+      if (ny !== null) layout.name.y = ny / pageH;
+      if (nw !== null) layout.name.w = nw / pageW;
+      if (nf !== null) layout.name.fontSize = Math.max(8, Math.floor(nf));
+      if (cx !== null) layout.club.x = cx / pageW;
+      if (cy !== null) layout.club.y = cy / pageH;
+      if (cw !== null) layout.club.w = cw / pageW;
+      if (cf !== null) layout.club.fontSize = Math.max(8, Math.floor(cf));
+      if (ddx !== null) layout.dobDay.x = ddx / pageW;
+      if (ddy !== null) layout.dobDay.y = ddy / pageH;
+      if (ddw !== null) layout.dobDay.w = ddw / pageW;
+      if (ddf !== null) layout.dobDay.fontSize = Math.max(8, Math.floor(ddf));
+      if (dmx !== null) layout.dobMonth.x = dmx / pageW;
+      if (dmy !== null) layout.dobMonth.y = dmy / pageH;
+      if (dmw !== null) layout.dobMonth.w = dmw / pageW;
+      if (dmf !== null) layout.dobMonth.fontSize = Math.max(8, Math.floor(dmf));
+      if (dyx !== null) layout.dobYear.x = dyx / pageW;
+      if (dyy !== null) layout.dobYear.y = dyy / pageH;
+      if (dyw !== null) layout.dobYear.w = dyw / pageW;
+      if (dyf !== null) layout.dobYear.fontSize = Math.max(8, Math.floor(dyf));
+    }
+
+    const photoX = Math.floor(pageW * layout.photo.x);
+    const photoY = Math.floor(pageH * layout.photo.y);
+    const photoW = Math.floor(pageW * layout.photo.w);
+    const photoH = Math.floor(pageH * layout.photo.h);
+    const inset = Math.max(0, Math.floor(layout.photo.inset || 0));
+    const innerX = photoX + inset;
+    const innerY = photoY + inset;
+    const innerW = Math.max(1, photoW - inset * 2);
+    const innerH = Math.max(1, photoH - inset * 2);
+
+    doc.save();
+    doc.rect(photoX, photoY, photoW, photoH).fill('#ffffff');
+    doc.rect(innerX, innerY, innerW, innerH).fill('#ffffff');
+    doc.restore();
+
+    const profilePath = resolveLocalImagePath(player.profileImage);
+    if (profilePath) {
+      try {
+        doc.save();
+        doc.rect(innerX, innerY, innerW, innerH).clip();
+        doc.image(profilePath, innerX, innerY, { fit: [innerW, innerH], align: 'center', valign: 'center' });
+        doc.restore();
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    doc.save();
+    doc.lineWidth(1).strokeColor('#9ca3af');
+    doc.rect(photoX, photoY, photoW, photoH).stroke();
+    doc.restore();
+
+    const nameX = Math.floor(pageW * layout.name.x);
+    const nameY = Math.floor(pageH * layout.name.y);
+    const nameW = Math.floor(pageW * layout.name.w);
+    doc.font('Helvetica-Bold').fontSize(layout.name.fontSize).fillColor('#111827');
+    doc.text(playerName || '-', nameX, nameY, {
+      width: nameW,
+      align: 'left',
+    });
+
+    const clubX = Math.floor(pageW * layout.club.x);
+    const clubY = Math.floor(pageH * layout.club.y);
+    const clubW = Math.floor(pageW * layout.club.w);
+    doc.font('Helvetica-Bold').fontSize(layout.club.fontSize).fillColor('#111827');
+    doc.text(String(club?.clubName || '-'), clubX, clubY, {
+      width: clubW,
+      align: 'left',
+    });
+
+    let dobDayText = '-';
+    let dobMonthText = '-';
+    let dobYearText = '-';
+    if (player.dateOfBirth) {
+      try {
+        const dt = new Date(player.dateOfBirth);
+        if (!Number.isNaN(dt.getTime())) {
+          dobDayText = String(dt.getDate()).padStart(2, '0');
+          dobMonthText = String(dt.getMonth() + 1).padStart(2, '0');
+          dobYearText = String(dt.getFullYear());
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    const dobDayX = Math.floor(pageW * layout.dobDay.x);
+    const dobDayY = Math.floor(pageH * layout.dobDay.y);
+    const dobDayW = Math.floor(pageW * layout.dobDay.w);
+    doc.font('Helvetica-Bold').fontSize(layout.dobDay.fontSize).fillColor('#111827');
+    doc.text(dobDayText, dobDayX, dobDayY, { width: dobDayW, align: 'left' });
+
+    const dobMonthX = Math.floor(pageW * layout.dobMonth.x);
+    const dobMonthY = Math.floor(pageH * layout.dobMonth.y);
+    const dobMonthW = Math.floor(pageW * layout.dobMonth.w);
+    doc.font('Helvetica-Bold').fontSize(layout.dobMonth.fontSize).fillColor('#111827');
+    doc.text(dobMonthText, dobMonthX, dobMonthY, { width: dobMonthW, align: 'left' });
+
+    const dobYearX = Math.floor(pageW * layout.dobYear.x);
+    const dobYearY = Math.floor(pageH * layout.dobYear.y);
+    const dobYearW = Math.floor(pageW * layout.dobYear.w);
+    doc.font('Helvetica-Bold').fontSize(layout.dobYear.fontSize).fillColor('#111827');
+    doc.text(dobYearText, dobYearX, dobYearY, { width: dobYearW, align: 'left' });
+
+    if (String(req.query?.debug || '').trim() === '1') {
+      doc.save();
+      doc.lineWidth(1).strokeColor('#ef4444');
+      doc.rect(photoX, photoY, photoW, photoH).stroke();
+      doc.strokeColor('#3b82f6');
+      doc.rect(nameX, nameY, nameW, 26).stroke();
+      doc.strokeColor('#22c55e');
+      doc.rect(clubX, clubY, clubW, 20).stroke();
+      doc.strokeColor('#a855f7');
+      doc.rect(dobDayX, dobDayY, dobDayW, 20).stroke();
+      doc.rect(dobMonthX, dobMonthY, dobMonthW, 20).stroke();
+      doc.rect(dobYearX, dobYearY, dobYearW, 20).stroke();
+      doc.restore();
+    }
+  } else {
+    doc.rect(left, top, contentW, bottom - top).lineWidth(2).stroke('#111827');
+    doc.rect(left + 10, top + 10, contentW - 20, bottom - top - 20).lineWidth(1).stroke('#111827');
+
+    const logoPath = resolveTDKALogoPath();
+    if (logoPath) {
+      try {
+        doc.image(logoPath, left + 18, top + 16, { fit: [70, 70] });
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(24)
+      .fillColor('#111827')
+      .text('THANE JILHA KABADDI ASSOCIATION', left, top + 28, { width: contentW, align: 'center' });
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(28)
+      .fillColor('#7c2d12')
+      .text('MERIT CERTIFICATE', left, top + 80, { width: contentW, align: 'center' });
+
+    const photoBoxW = 120;
+    const photoBoxH = 120;
+    const photoX = right - photoBoxW - 24;
+    const photoY = top + 24;
+    doc.rect(photoX, photoY, photoBoxW, photoBoxH).lineWidth(1).stroke('#111827');
+    const imgPath = resolveLocalImagePath(player.profileImage);
+    if (imgPath) {
+      try {
+        doc.image(imgPath, photoX + 6, photoY + 6, { fit: [photoBoxW - 12, photoBoxH - 12], align: 'center', valign: 'center' });
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    const midY = top + 170;
+    doc.font('Helvetica').fontSize(14).fillColor('#111827');
+    doc.text('This is to certify that', left + 40, midY);
+    doc.font('Helvetica-Bold').fontSize(18).text(playerName || '-', left + 220, midY - 2);
+
+    const line1 = `from club "${String(club?.clubName || '-')}" has participated in the competition`;
+    doc.font('Helvetica').fontSize(14).text(line1, left + 40, midY + 28);
+    doc.font('Helvetica-Bold').fontSize(16).text(`"${competition.competitionName}"`, left + 40, midY + 54);
+
+    const periodLine = `Competition Period: ${formatDateDMY(competition.fromDate)} to ${formatDateDMY(competition.toDate)}`;
+    doc.font('Helvetica').fontSize(12).text(periodLine, left + 40, midY + 82);
+
+    const uid = player.uniqueIdNumber ? String(player.uniqueIdNumber) : '-';
+    const dob = player.dateOfBirth ? formatDateDMY(player.dateOfBirth) : '-';
+    doc.font('Helvetica').fontSize(12).text(`Membership/Unique ID: ${uid}`, left + 40, midY + 110);
+    doc.font('Helvetica').fontSize(12).text(`Date of Birth: ${dob}`, left + 40, midY + 132);
+
+    const signY = bottom - 90;
+    const colW = contentW / 3;
+    doc.font('Helvetica').fontSize(12);
+    doc.text('Secretary', left + 20, signY, { width: colW, align: 'center' });
+    doc.text('President', left + colW + 20, signY, { width: colW, align: 'center' });
+    doc.text('Coach/Manager', left + 2 * colW + 20, signY, { width: colW, align: 'center' });
+  }
+
+  doc.end();
+});
+
 module.exports = {
   getCompetitions,
   createCompetition,
@@ -2231,6 +2895,7 @@ module.exports = {
   removePlayerFromCompetition,
   generateClubCompetitionPDF,
   generateCompetitionClubsPDF,
+  generateMeritCertificatePDF,
   getClubPlayersInCompetition,
   getObserverForCompetition,
   updateObserverForCompetition,
