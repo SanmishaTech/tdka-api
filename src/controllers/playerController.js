@@ -95,6 +95,75 @@ const isBlankish = (v) => {
   return lc === "undefined" || lc === "null";
 };
 
+const resolveLocalImagePath = (p) => {
+  if (!p) return null;
+  const raw = String(p).trim();
+  const uploadsRoot = path.resolve(__dirname, "..", "..", "uploads");
+
+  const mapUploadsPath = (maybePath) => {
+    if (!maybePath) return null;
+    const s = String(maybePath).trim();
+    const normalized = s.replace(/\\/g, "/");
+    const idx = normalized.toLowerCase().indexOf("/uploads/");
+    if (idx >= 0) {
+      const rel = normalized.slice(idx + "/uploads/".length);
+      const abs = path.resolve(uploadsRoot, rel);
+      try {
+        return fs.existsSync(abs) ? abs : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    if (/^uploads\//i.test(normalized)) {
+      const rel = normalized.replace(/^uploads\//i, "");
+      const abs = path.resolve(uploadsRoot, rel);
+      try {
+        return fs.existsSync(abs) ? abs : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return null;
+  };
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      const mapped = mapUploadsPath(url.pathname);
+      if (mapped) return mapped;
+    } catch (_) {
+      return null;
+    }
+    return null;
+  }
+
+  const mapped = mapUploadsPath(raw);
+  if (mapped) return mapped;
+
+  try {
+    if (path.isAbsolute(raw)) return fs.existsSync(raw) ? raw : null;
+  } catch (_) {
+    return null;
+  }
+
+  const candidates = [
+    path.resolve(process.cwd(), raw),
+    path.resolve(process.cwd(), "backend", raw),
+    path.resolve(__dirname, "../../..", raw),
+    path.resolve(__dirname, "../../..", "backend", raw),
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch (_) {
+      // ignore
+    }
+  }
+  return null;
+};
+
 // Get all players with pagination and filtering
 const getPlayers = asyncHandler(async (req, res) => {
   const {
@@ -369,7 +438,251 @@ const exportPlayers = asyncHandler(async (req, res) => {
   res.end();
 });
 
-// Get player by ID
+const exportPlayersPDF = asyncHandler(async (req, res) => {
+  const {
+    search = "",
+    clubId,
+    isSuspended,
+    aadharVerified,
+    sortBy = "id",
+    sortOrder = "asc",
+  } = req.query;
+
+  const where = {};
+
+  if (req.user) {
+    if (req.user.role === "clubadmin" && req.user.clubId) {
+      where.clubId = req.user.clubId;
+    } else if (req.user.role === "CLUB") {
+      const clubAdminUser = await prisma.user.findFirst({
+        where: {
+          email: req.user.email,
+          role: "clubadmin",
+        },
+      });
+      if (clubAdminUser && clubAdminUser.clubId) {
+        where.clubId = clubAdminUser.clubId;
+      }
+    }
+  }
+
+  if (!isBlankish(clubId)) {
+    const parsedClubId = parseInt(String(clubId), 10);
+    if (Number.isNaN(parsedClubId)) {
+      throw createError(400, "Invalid club ID");
+    }
+    if (!where.clubId) {
+      where.clubId = parsedClubId;
+    }
+  }
+
+  if (search) {
+    where.OR = [
+      { firstName: { contains: search } },
+      { lastName: { contains: search } },
+      { uniqueIdNumber: { contains: search } },
+      { aadharNumber: { contains: search } },
+    ];
+  }
+
+  if (isSuspended !== undefined) {
+    where.isSuspended = isSuspended === "true";
+  }
+
+  if (aadharVerified !== undefined) {
+    where.aadharVerified = aadharVerified === "true";
+  }
+
+  const orderBy = { [sortBy]: sortOrder };
+
+  const players = await prisma.player.findMany({
+    where,
+    include: {
+      club: {
+        include: {
+          place: {
+            include: {
+              region: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy,
+  });
+
+  const doc = new PDFDocument({ size: "A4", margin: 36 });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="TDKA_Players_Export.pdf"'
+  );
+  doc.pipe(res);
+
+  const resolveTDKALogoPath = () => {
+    const candidates = [
+      path.resolve(__dirname, '../../..', 'frontend', 'public', 'TDKA logo.png'),
+      path.resolve(__dirname, '../../..', 'frontend', 'dist', 'TDKA logo.png'),
+      path.resolve(process.cwd(), 'frontend', 'public', 'TDKA logo.png'),
+      path.resolve(process.cwd(), 'frontend', 'dist', 'TDKA logo.png'),
+    ];
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch (_) {
+        // ignore
+      }
+    }
+    return null;
+  };
+
+  const logoPath = resolveTDKALogoPath();
+  const primaryRed = '#dc2626';
+  const headerLineColor = '#000000';
+  const assocName = 'THANE JILHA KABADDI ASSOCIATION';
+  const assocLine1 = 'Office: Dahagav, Titwala';
+  const assocLine2 = 'Phone: -   Email: dahagav@tdka.com';
+
+  const drawLetterhead = () => {
+    const pageLeft = doc.page.margins.left;
+    const pageRight = doc.page.width - doc.page.margins.right;
+    const contentW = pageRight - pageLeft;
+    const topY = doc.page.margins.top;
+    const logoSize = 56;
+
+    if (logoPath) {
+      try {
+        doc.image(logoPath, pageLeft, topY, { fit: [logoSize, logoSize] });
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(18)
+      .fillColor(primaryRed)
+      .text(assocName, pageLeft, topY + 2, { width: contentW, align: 'center' });
+    doc
+      .font('Helvetica')
+      .fontSize(9)
+      .fillColor('black')
+      .text(assocLine1, pageLeft, topY + 26, { width: contentW, align: 'center' });
+    doc
+      .font('Helvetica')
+      .fontSize(9)
+      .fillColor('black')
+      .text(assocLine2, pageLeft, topY + 40, { width: contentW, align: 'center' });
+
+    doc
+      .moveTo(pageLeft, topY + 66)
+      .lineTo(pageRight, topY + 66)
+      .lineWidth(1)
+      .stroke(headerLineColor);
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(12)
+      .fillColor('black')
+      .text('Players Export', pageLeft, topY + 74, { width: contentW, align: 'center' });
+
+    doc.y = topY + 96;
+  };
+
+  drawLetterhead();
+
+  const pageLeft = doc.page.margins.left;
+  const pageRight = doc.page.width - doc.page.margins.right;
+
+  const contentW = pageRight - pageLeft;
+  const pageBottom = doc.page.height - doc.page.margins.bottom;
+
+  const photoBox = 72;
+  const photoInset = 6;
+  const gapX = 14;
+  const gapY = 14;
+  const borderColor = "#9ca3af";
+
+  const detailsX = pageLeft + photoBox + gapX;
+  const detailsW = pageRight - detailsX;
+
+  const ensureSpace = (h) => {
+    if (doc.y + h > pageBottom) {
+      doc.addPage();
+      drawLetterhead();
+    }
+  };
+
+  for (const p of players) {
+    const fullName = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(" ").trim() || "-";
+    const clubName = p.club?.clubName || "-";
+    const regionName = p.club?.place?.region?.regionName || "-";
+    const placeName = p.club?.place?.placeName || "-";
+    const mobile = p.mobile || "-";
+    const uniqueIdNumber = p.uniqueIdNumber || "-";
+    const aadharVerifiedText = p.aadharVerified ? "Yes" : "No";
+
+    const locParts = [regionName, placeName].filter((v) => v && v !== "-");
+    const locLine = locParts.length ? locParts.join(" • ") : "-";
+
+    const detailLines = [
+      `Unique ID: ${uniqueIdNumber}`,
+      `Mobile: ${mobile}`,
+      `Club: ${clubName}`,
+      locLine !== "-" ? locLine : `${regionName} • ${placeName}`,
+      `Aadhaar Verified: ${aadharVerifiedText}`,
+    ];
+
+    doc.font("Helvetica-Bold").fontSize(12);
+    const nameH = doc.heightOfString(fullName, { width: detailsW });
+    doc.font("Helvetica").fontSize(9);
+    const detailsText = detailLines.filter(Boolean).join("\n");
+    const detailsH = doc.heightOfString(detailsText, { width: detailsW, lineGap: 2 });
+
+    const itemH = Math.max(photoBox, nameH + 4 + detailsH);
+    ensureSpace(itemH + gapY);
+
+    const y0 = doc.y;
+
+    doc.rect(pageLeft, y0, photoBox, photoBox).lineWidth(1).stroke(borderColor);
+    const imgPath = resolveLocalImagePath(p.profileImage);
+    if (imgPath) {
+      try {
+        doc.save();
+        doc
+          .rect(pageLeft + photoInset, y0 + photoInset, photoBox - photoInset * 2, photoBox - photoInset * 2)
+          .clip();
+        doc.image(imgPath, pageLeft + photoInset, y0 + photoInset, {
+          fit: [photoBox - photoInset * 2, photoBox - photoInset * 2],
+          align: "center",
+          valign: "center",
+        });
+        doc.restore();
+      } catch (_) {
+        doc.font("Helvetica").fontSize(7).fillColor("#6b7280").text("PHOTO", pageLeft, y0 + photoBox / 2 - 4, {
+          width: photoBox,
+          align: "center",
+        });
+      }
+    } else {
+      doc.font("Helvetica").fontSize(7).fillColor("#6b7280").text("NO PHOTO", pageLeft, y0 + photoBox / 2 - 4, {
+        width: photoBox,
+        align: "center",
+      });
+    }
+
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827");
+    doc.text(fullName, detailsX, y0, { width: detailsW });
+
+    doc.font("Helvetica").fontSize(9).fillColor("#111827");
+    doc.text(detailsText, detailsX, y0 + nameH + 4, { width: detailsW, lineGap: 2 });
+
+    doc.y = y0 + itemH + gapY;
+  }
+
+  doc.end();
+});
+
 const getPlayerById = asyncHandler(async (req, res) => {
   const playerId = parseInt(req.params.id);
   if (!playerId) throw createError(400, "Invalid player ID");
@@ -827,6 +1140,7 @@ const generatePlayerICardPDF = asyncHandler(async (req, res) => {
 module.exports = {
   getPlayers,
   exportPlayers,
+  exportPlayersPDF,
   getPlayerById,
   generatePlayerICardPDF,
   createPlayer,

@@ -226,6 +226,8 @@ router.post("/:id(\\d+)/verify-aadhar", auth, ...aadharVerifyUpload, playerContr
 
 router.get("/export", auth, playerController.exportPlayers);
 
+router.get("/export/pdf", auth, playerController.exportPlayersPDF);
+
 router.get("/:id(\\d+)/icard/pdf", auth, playerController.generatePlayerICardPDF);
 
 router.get("/:id(\\d+)", auth, playerController.getPlayerById);
