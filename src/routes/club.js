@@ -81,6 +81,8 @@ router.post("/import", auth, ...clubExcelUpload, clubController.importClubs);
  */
 router.get("/import/template", auth, clubController.downloadClubImportTemplate);
 
+router.get("/export", auth, clubController.exportClubs);
+
 /**
  * @swagger
  * /clubs:

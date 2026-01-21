@@ -47,7 +47,13 @@ const getClubs = asyncHandler(async (req, res) => {
   const limit = Math.max(1, parseInt(req.query.limit) || 10);
   const skip = (page - 1) * limit;
 
-  const { search = "", sortBy = "clubName", sortOrder = "asc" } = req.query;
+  const {
+    search = "",
+    sortBy = "clubName",
+    sortOrder = "asc",
+    regionId,
+    placeId,
+  } = req.query;
 
   // Map frontend sort field "name" to database column "clubName"
   const mappedSortBy = sortBy === "name" ? "clubName" : sortBy;
@@ -56,12 +62,26 @@ const getClubs = asyncHandler(async (req, res) => {
     ? {
         OR: [
           { clubName: { contains: search } },
-          { city: { contains: search } },
-          { address: { contains: search } },
           { affiliationNumber: { contains: search } },
         ],
       }
     : {};
+
+  if (placeId !== undefined && placeId !== "") {
+    const parsedPlaceId = parseInt(placeId, 10);
+    if (Number.isNaN(parsedPlaceId)) {
+      throw createError(400, "Invalid placeId");
+    }
+    where.placeId = parsedPlaceId;
+  }
+
+  if (regionId !== undefined && regionId !== "") {
+    const parsedRegionId = parseInt(regionId, 10);
+    if (Number.isNaN(parsedRegionId)) {
+      throw createError(400, "Invalid regionId");
+    }
+    where.place = { regionId: parsedRegionId };
+  }
 
   const [clubs, total] = await Promise.all([
     prisma.club.findMany({
@@ -714,6 +734,96 @@ const importClubs = asyncHandler(async (req, res) => {
   }
 });
 
+const exportClubs = asyncHandler(async (req, res) => {
+  const {
+    search = "",
+    sortBy = "clubName",
+    sortOrder = "asc",
+    regionId,
+    placeId,
+  } = req.query;
+
+  const mappedSortBy = sortBy === "name" ? "clubName" : sortBy;
+
+  const where = search
+    ? {
+        OR: [
+          { clubName: { contains: search } },
+          { affiliationNumber: { contains: search } },
+        ],
+      }
+    : {};
+
+  if (placeId !== undefined && placeId !== "") {
+    const parsedPlaceId = parseInt(placeId, 10);
+    if (Number.isNaN(parsedPlaceId)) {
+      throw createError(400, "Invalid placeId");
+    }
+    where.placeId = parsedPlaceId;
+  }
+
+  if (regionId !== undefined && regionId !== "") {
+    const parsedRegionId = parseInt(regionId, 10);
+    if (Number.isNaN(parsedRegionId)) {
+      throw createError(400, "Invalid regionId");
+    }
+    where.place = { regionId: parsedRegionId };
+  }
+
+  const clubs = await prisma.club.findMany({
+    where,
+    orderBy: { [mappedSortBy]: sortOrder === "desc" ? "desc" : "asc" },
+    select: {
+      id: true,
+      uniqueNumber: true,
+      clubName: true,
+      email: true,
+      place: {
+        select: {
+          placeName: true,
+          region: {
+            select: {
+              regionName: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Clubs");
+  worksheet.columns = [
+    { header: "Unique Number", key: "uniqueNumber", width: 18 },
+    { header: "Club Name", key: "clubName", width: 30 },
+    { header: "Place", key: "place", width: 20 },
+    { header: "Region", key: "region", width: 20 },
+    { header: "Email", key: "email", width: 32 },
+  ];
+
+  clubs.forEach((c) => {
+    worksheet.addRow({
+      uniqueNumber: c.uniqueNumber || "",
+      clubName: c.clubName || "",
+      place: c.place?.placeName || "",
+      region: c.place?.region?.regionName || "",
+      email: c.email || "",
+    });
+  });
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="TDKA_Clubs_Export.xlsx"'
+  );
+
+  await workbook.xlsx.write(res);
+  res.end();
+});
+
 module.exports = {
   getClubs,
   createClub,
@@ -722,6 +832,7 @@ module.exports = {
   deleteClub,
   getPlaces,
   importClubs,
+  exportClubs,
   downloadClubImportTemplate: asyncHandler(async (req, res) => {
     // Generate a simple Excel template with required headers
     const workbook = new ExcelJS.Workbook();
