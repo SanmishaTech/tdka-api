@@ -95,6 +95,18 @@ const getClubs = asyncHandler(async (req, res) => {
         affiliationNumber: true,
         uniqueNumber: true,
         placeId: true,
+        place: {
+          select: {
+            id: true,
+            placeName: true,
+            region: {
+              select: {
+                id: true,
+                regionName: true,
+              },
+            },
+          },
+        },
         city: true,
         address: true,
         mobile: true,
@@ -506,8 +518,13 @@ const deleteClub = asyncHandler(async (req, res) => {
   const existing = await prisma.club.findUnique({ where: { id } });
   if (!existing) throw createError(404, "Club not found");
 
-  await prisma.club.delete({ where: { id } });
-  res.json({ message: "Club deleted successfully" });
+  const { deletedUsersCount } = await prisma.$transaction(async (tx) => {
+    const deletedUsers = await tx.user.deleteMany({ where: { clubId: id } });
+    await tx.club.delete({ where: { id } });
+    return { deletedUsersCount: deletedUsers.count };
+  });
+
+  res.json({ message: "Club deleted successfully", deletedUsersCount });
 });
 
 // Get places for dropdown

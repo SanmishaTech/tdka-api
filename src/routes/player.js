@@ -224,6 +224,8 @@ router.post("/verify-aadhar", auth, ...aadharVerifyUpload, playerController.veri
 // With playerId – server can use stored image; optional file upload to re-verify
 router.post("/:id/verify-aadhar", auth, ...aadharVerifyUpload, playerController.verifyAadharOCR);
 
+router.get("/export", auth, playerController.exportPlayers);
+
 router.get("/:id/icard/pdf", auth, playerController.generatePlayerICardPDF);
 
 router.get("/:id", auth, playerController.getPlayerById);

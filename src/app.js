@@ -26,6 +26,8 @@ app.use(morgan("dev"));
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy:
+      process.env.NODE_ENV === "production" ? undefined : { policy: "cross-origin" },
     contentSecurityPolicy:
       process.env.NODE_ENV === "production" ? undefined : false
   })
@@ -67,10 +69,7 @@ console.log(`Frontend build path: ${frontendDistPath}`);
 console.log(`Serving frontend static files from: ${frontendDistPath}`);
 app.use(express.static(frontendDistPath));
 
-const uploadsPath =
-  process.env.NODE_ENV === "production"
-    ? process.env.UPLOADS_PATH || path.resolve(__dirname, "..", "uploads")
-    : path.resolve(__dirname, "..", "uploads");
+const uploadsPath = process.env.UPLOADS_PATH || path.resolve(process.cwd(), "uploads");
 
 console.log(`Serving uploads from: ${uploadsPath}`);
 app.use("/uploads", express.static(uploadsPath));
