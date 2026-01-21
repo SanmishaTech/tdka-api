@@ -87,6 +87,14 @@ const generateUniquePlayerIdNumber = async () => {
   return `${prefix}${nextSeq}`;
 };
 
+const isBlankish = (v) => {
+  if (v === undefined || v === null) return true;
+  const s = String(v).trim();
+  if (!s) return true;
+  const lc = s.toLowerCase();
+  return lc === "undefined" || lc === "null";
+};
+
 // Get all players with pagination and filtering
 const getPlayers = asyncHandler(async (req, res) => {
   const {
@@ -127,8 +135,8 @@ const getPlayers = asyncHandler(async (req, res) => {
     // Super admins and other roles can see all players (no clubId filter)
   }
 
-  if (clubId !== undefined && clubId !== null && clubId !== "") {
-    const parsedClubId = parseInt(clubId);
+  if (!isBlankish(clubId)) {
+    const parsedClubId = parseInt(String(clubId), 10);
     if (Number.isNaN(parsedClubId)) {
       throw createError(400, "Invalid club ID");
     }
@@ -259,8 +267,8 @@ const exportPlayers = asyncHandler(async (req, res) => {
     }
   }
 
-  if (clubId !== undefined && clubId !== null && clubId !== "") {
-    const parsedClubId = parseInt(clubId);
+  if (!isBlankish(clubId)) {
+    const parsedClubId = parseInt(String(clubId), 10);
     if (Number.isNaN(parsedClubId)) {
       throw createError(400, "Invalid club ID");
     }

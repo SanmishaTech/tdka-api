@@ -118,7 +118,7 @@ router.get("/", auth, clubController.getClubs);
  *       404:
  *         description: Club not found
  */
-router.get("/:id", auth, clubController.getClub);
+router.get("/:id(\\d+)", auth, clubController.getClub);
 
 /**
  * @swagger
@@ -167,7 +167,7 @@ router.post("/", auth, clubController.createClub);
  *       404:
  *         description: Club not found
  */
-router.put("/:id", auth, clubController.updateClub);
+router.put("/:id(\\d+)", auth, clubController.updateClub);
 
 /**
  * @swagger
@@ -190,6 +190,6 @@ router.put("/:id", auth, clubController.updateClub);
  *       404:
  *         description: Club not found
  */
-router.delete("/:id", auth, clubController.deleteClub);
+router.delete("/:id(\\d+)", auth, clubController.deleteClub);
 
 module.exports = router;

@@ -222,13 +222,13 @@ router.get("/", auth, playerController.getPlayers);
 // Without playerId – client uploads Aadhaar image and number; useful before creating player
 router.post("/verify-aadhar", auth, ...aadharVerifyUpload, playerController.verifyAadharOCR);
 // With playerId – server can use stored image; optional file upload to re-verify
-router.post("/:id/verify-aadhar", auth, ...aadharVerifyUpload, playerController.verifyAadharOCR);
+router.post("/:id(\\d+)/verify-aadhar", auth, ...aadharVerifyUpload, playerController.verifyAadharOCR);
 
 router.get("/export", auth, playerController.exportPlayers);
 
-router.get("/:id/icard/pdf", auth, playerController.generatePlayerICardPDF);
+router.get("/:id(\\d+)/icard/pdf", auth, playerController.generatePlayerICardPDF);
 
-router.get("/:id", auth, playerController.getPlayerById);
+router.get("/:id(\\d+)", auth, playerController.getPlayerById);
 
 /**
  * @swagger
@@ -356,7 +356,7 @@ router.post("/", auth, ...playerImageUpload, playerController.createPlayer);
  *       404:
  *         description: Player not found
  */
-router.put("/:id", auth, ...playerImageUpload, playerController.updatePlayer);
+router.put("/:id(\\d+)", auth, ...playerImageUpload, playerController.updatePlayer);
 
 /**
  * @swagger
@@ -401,7 +401,7 @@ router.put("/:id", auth, ...playerImageUpload, playerController.updatePlayer);
  *       404:
  *         description: Player not found
  */
-router.patch("/:id/suspension", auth, playerController.toggleSuspension);
+router.patch("/:id(\\d+)/suspension", auth, playerController.toggleSuspension);
 
 /**
  * @swagger
@@ -446,13 +446,13 @@ router.patch("/:id/suspension", auth, playerController.toggleSuspension);
  *       404:
  *         description: Player not found
  */
-router.patch("/:id/aadhar-verification", auth, playerController.toggleAadharVerification);
+router.patch("/:id(\\d+)/aadhar-verification", auth, playerController.toggleAadharVerification);
 
 // Club-related routes
-router.get("/:playerId/club", auth, playerController.getPlayerClub);
-router.get("/club/:clubId", auth, playerController.getClubPlayers);
+router.get("/:playerId(\\d+)/club", auth, playerController.getPlayerClub);
+router.get("/club/:clubId(\\d+)", auth, playerController.getClubPlayers);
 router.post("/transfer", auth, playerController.transferPlayer);
-router.delete("/:playerId/club", auth, playerController.removePlayerFromClub);
+router.delete("/:playerId(\\d+)/club", auth, playerController.removePlayerFromClub);
 router.get("/stats/clubs", auth, playerController.getClubStats);
 
 module.exports = router;
