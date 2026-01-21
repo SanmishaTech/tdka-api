@@ -521,10 +521,10 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
 
   const resolveTDKALogoPath = () => {
     const candidates = [
-      path.resolve(__dirname, '../../..', 'frontend', 'public', 'TDKA logo.png'),
-      path.resolve(__dirname, '../../..', 'frontend', 'dist', 'TDKA logo.png'),
-      path.resolve(process.cwd(), 'frontend', 'public', 'TDKA logo.png'),
-      path.resolve(process.cwd(), 'frontend', 'dist', 'TDKA logo.png'),
+      path.resolve(__dirname, "../../..", "frontend", "public", "TDKA logo.png"),
+      path.resolve(__dirname, "../../..", "frontend", "dist", "TDKA logo.png"),
+      path.resolve(process.cwd(), "frontend", "public", "TDKA logo.png"),
+      path.resolve(process.cwd(), "frontend", "dist", "TDKA logo.png"),
     ];
     for (const c of candidates) {
       try {
@@ -537,11 +537,37 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
   };
 
   const logoPath = resolveTDKALogoPath();
-  const primaryRed = '#dc2626';
-  const headerLineColor = '#000000';
-  const assocName = 'THANE JILHA KABADDI ASSOCIATION';
-  const assocLine1 = 'Office: Dahagav, Titwala';
-  const assocLine2 = 'Phone: -   Email: dahagav@tdka.com';
+  const primaryRed = "#dc2626";
+  const headerLineColor = "#000000";
+  const assocName = "THANE JILHA KABADDI ASSOCIATION";
+
+  let clubNameForHeader = null;
+  if (where.clubId) {
+    try {
+      const club = await prisma.club.findUnique({
+        where: { id: where.clubId },
+        select: { clubName: true },
+      });
+      clubNameForHeader = club?.clubName || null;
+    } catch (_) {
+      clubNameForHeader = null;
+    }
+  }
+
+  const filters = [];
+  if (String(search || "").trim()) {
+    filters.push(`Search: ${String(search).trim()}`);
+  }
+  if (where.clubId) {
+    filters.push(`Club: ${clubNameForHeader || String(where.clubId)}`);
+  }
+  if (isSuspended !== undefined) {
+    filters.push(`Suspended: ${isSuspended === "true" ? "Yes" : "No"}`);
+  }
+  if (aadharVerified !== undefined) {
+    filters.push(`Aadhaar Verified: ${aadharVerified === "true" ? "Yes" : "No"}`);
+  }
+  const filtersLine = filters.length ? `Filters: ${filters.join(" | ")}` : "All Players";
 
   const drawLetterhead = () => {
     const pageLeft = doc.page.margins.left;
@@ -559,42 +585,36 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     }
 
     doc
-      .font('Helvetica-Bold')
+      .font("Helvetica-Bold")
       .fontSize(18)
       .fillColor(primaryRed)
-      .text(assocName, pageLeft, topY + 2, { width: contentW, align: 'center' });
-    doc
-      .font('Helvetica')
-      .fontSize(9)
-      .fillColor('black')
-      .text(assocLine1, pageLeft, topY + 26, { width: contentW, align: 'center' });
-    doc
-      .font('Helvetica')
-      .fontSize(9)
-      .fillColor('black')
-      .text(assocLine2, pageLeft, topY + 40, { width: contentW, align: 'center' });
+      .text(assocName, pageLeft, topY + 2, { width: contentW, align: "center" });
 
     doc
-      .moveTo(pageLeft, topY + 66)
-      .lineTo(pageRight, topY + 66)
+      .font("Helvetica")
+      .fontSize(9)
+      .fillColor("black")
+      .text(filtersLine, pageLeft, topY + 30, { width: contentW, align: "center" });
+
+    doc
+      .moveTo(pageLeft, topY + 56)
+      .lineTo(pageRight, topY + 56)
       .lineWidth(1)
       .stroke(headerLineColor);
 
     doc
-      .font('Helvetica-Bold')
+      .font("Helvetica-Bold")
       .fontSize(12)
-      .fillColor('black')
-      .text('Players Export', pageLeft, topY + 74, { width: contentW, align: 'center' });
+      .fillColor("black")
+      .text("Players Export", pageLeft, topY + 64, { width: contentW, align: "center" });
 
-    doc.y = topY + 96;
+    doc.y = topY + 86;
   };
 
   drawLetterhead();
 
   const pageLeft = doc.page.margins.left;
   const pageRight = doc.page.width - doc.page.margins.right;
-
-  const contentW = pageRight - pageLeft;
   const pageBottom = doc.page.height - doc.page.margins.bottom;
 
   const photoBox = 72;
