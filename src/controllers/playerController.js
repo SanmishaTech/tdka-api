@@ -7,6 +7,13 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
+let sharp = null;
+try {
+  sharp = require("sharp");
+} catch (_) {
+  sharp = null;
+}
+
 const prisma = new PrismaClient();
 
 // ... rest of the code remains the same ...
@@ -25,6 +32,41 @@ const resolveClubIdFromReqUser = async (req) => {
     return clubAdminUser?.clubId || null;
   }
   return null;
+};
+
+const getThumbPath = (absPath, size, quality) => {
+  if (!absPath) return null;
+  const dir = path.dirname(absPath);
+  return path.join(dir, `__thumb_${size}_q${quality}.jpg`);
+};
+
+const ensureThumbnail = async (absPath, size, quality) => {
+  if (!absPath) return null;
+  if (!sharp) return absPath;
+
+  const thumbPath = getThumbPath(absPath, size, quality);
+  if (!thumbPath) return absPath;
+
+  try {
+    const [srcStat, thumbStat] = await Promise.all([
+      fs.promises.stat(absPath),
+      fs.promises.stat(thumbPath).catch(() => null),
+    ]);
+
+    if (thumbStat && thumbStat.mtimeMs >= srcStat.mtimeMs) {
+      return thumbPath;
+    }
+
+    await sharp(absPath)
+      .rotate()
+      .resize(size, size, { fit: "cover" })
+      .jpeg({ quality, mozjpeg: true })
+      .toFile(thumbPath);
+
+    return thumbPath;
+  } catch (_) {
+    return absPath;
+  }
 };
 
 const parseGroupIds = (input) => {
@@ -194,8 +236,8 @@ const getPlayers = asyncHandler(async (req, res) => {
       const clubAdminUser = await prisma.user.findFirst({
         where: {
           email: req.user.email,
-          role: "clubadmin"
-        }
+          role: "clubadmin",
+        },
       });
       if (clubAdminUser && clubAdminUser.clubId) {
         where.clubId = clubAdminUser.clubId;
@@ -511,11 +553,15 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     orderBy,
   });
 
+  const isCompressedExport = players.length > 1000;
+  const thumbSize = isCompressedExport ? 64 : 96;
+  const thumbQuality = isCompressedExport ? 45 : 60;
+
   const doc = new PDFDocument({ size: "A4", margin: 36 });
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    'attachment; filename="TDKA_Players_Export.pdf"'
+    `attachment; filename="${isCompressedExport ? "TDKA_Players_Export_Compressed" : "TDKA_Players_Export"}.pdf"`
   );
   doc.pipe(res);
 
@@ -643,7 +689,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     }
   };
 
-  const drawPlayerCard = (p, x0, y0, w, h) => {
+  const drawPlayerCard = async (p, x0, y0, w, h) => {
     const fullName = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(" ").trim() || "-";
     const clubName = p.club?.clubName || "-";
     const regionName = p.club?.place?.region?.regionName || "-";
@@ -669,7 +715,8 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     const photoY = y0 + cardPad;
     doc.rect(photoX, photoY, photoBox, photoBox).lineWidth(1).stroke(borderColor);
 
-    const imgPath = resolveLocalImagePath(p.profileImage);
+    const originalPath = resolveLocalImagePath(p.profileImage);
+    const imgPath = await ensureThumbnail(originalPath, thumbSize, thumbQuality);
     if (imgPath) {
       try {
         doc.save();
@@ -757,9 +804,9 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
       ensureSpace(rowH + rowGapY, clubName);
 
       const y0 = doc.y;
-      drawPlayerCard(leftP, pageLeft, y0, cardW, rowH);
+      await drawPlayerCard(leftP, pageLeft, y0, cardW, rowH);
       if (rightP) {
-        drawPlayerCard(rightP, pageLeft + cardW + gridGapX, y0, cardW, rowH);
+        await drawPlayerCard(rightP, pageLeft + cardW + gridGapX, y0, cardW, rowH);
       }
 
       doc.y = y0 + rowH + rowGapY;
