@@ -617,23 +617,33 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
   const pageRight = doc.page.width - doc.page.margins.right;
   const pageBottom = doc.page.height - doc.page.margins.bottom;
 
-  const photoBox = 72;
-  const photoInset = 6;
-  const gapX = 14;
-  const gapY = 14;
+  const contentW = pageRight - pageLeft;
+  const gridGapX = 16;
+  const rowGapY = 14;
+  const cardW = (contentW - gridGapX) / 2;
+  const cardPad = 10;
+  const photoBox = 56;
+  const photoInset = 4;
+  const innerGapX = 10;
   const borderColor = "#9ca3af";
 
-  const detailsX = pageLeft + photoBox + gapX;
-  const detailsW = pageRight - detailsX;
+  const newPage = () => {
+    doc.addPage();
+    drawLetterhead();
+  };
 
-  const ensureSpace = (h) => {
+  const ensureSpace = (h, currentClubName) => {
     if (doc.y + h > pageBottom) {
-      doc.addPage();
-      drawLetterhead();
+      newPage();
+      if (currentClubName) {
+        doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827");
+        doc.text(String(currentClubName), pageLeft, doc.y, { width: contentW });
+        doc.moveDown(0.4);
+      }
     }
   };
 
-  for (const p of players) {
+  const drawPlayerCard = (p, x0, y0, w, h) => {
     const fullName = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(" ").trim() || "-";
     const clubName = p.club?.clubName || "-";
     const regionName = p.club?.place?.region?.regionName || "-";
@@ -645,7 +655,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     const locParts = [regionName, placeName].filter((v) => v && v !== "-");
     const locLine = locParts.length ? locParts.join(" • ") : "-";
 
-    const detailLines = [
+    const detailsLines = [
       `Unique ID: ${uniqueIdNumber}`,
       `Mobile: ${mobile}`,
       `Club: ${clubName}`,
@@ -653,51 +663,109 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
       `Aadhaar Verified: ${aadharVerifiedText}`,
     ];
 
-    doc.font("Helvetica-Bold").fontSize(12);
-    const nameH = doc.heightOfString(fullName, { width: detailsW });
-    doc.font("Helvetica").fontSize(9);
-    const detailsText = detailLines.filter(Boolean).join("\n");
-    const detailsH = doc.heightOfString(detailsText, { width: detailsW, lineGap: 2 });
+    doc.rect(x0, y0, w, h).lineWidth(1).stroke(borderColor);
 
-    const itemH = Math.max(photoBox, nameH + 4 + detailsH);
-    ensureSpace(itemH + gapY);
+    const photoX = x0 + cardPad;
+    const photoY = y0 + cardPad;
+    doc.rect(photoX, photoY, photoBox, photoBox).lineWidth(1).stroke(borderColor);
 
-    const y0 = doc.y;
-
-    doc.rect(pageLeft, y0, photoBox, photoBox).lineWidth(1).stroke(borderColor);
     const imgPath = resolveLocalImagePath(p.profileImage);
     if (imgPath) {
       try {
         doc.save();
         doc
-          .rect(pageLeft + photoInset, y0 + photoInset, photoBox - photoInset * 2, photoBox - photoInset * 2)
+          .rect(photoX + photoInset, photoY + photoInset, photoBox - photoInset * 2, photoBox - photoInset * 2)
           .clip();
-        doc.image(imgPath, pageLeft + photoInset, y0 + photoInset, {
+        doc.image(imgPath, photoX + photoInset, photoY + photoInset, {
           fit: [photoBox - photoInset * 2, photoBox - photoInset * 2],
           align: "center",
           valign: "center",
         });
         doc.restore();
       } catch (_) {
-        doc.font("Helvetica").fontSize(7).fillColor("#6b7280").text("PHOTO", pageLeft, y0 + photoBox / 2 - 4, {
+        doc.font("Helvetica").fontSize(7).fillColor("#6b7280").text("PHOTO", photoX, photoY + photoBox / 2 - 4, {
           width: photoBox,
           align: "center",
         });
       }
     } else {
-      doc.font("Helvetica").fontSize(7).fillColor("#6b7280").text("NO PHOTO", pageLeft, y0 + photoBox / 2 - 4, {
+      doc.font("Helvetica").fontSize(7).fillColor("#6b7280").text("NO PHOTO", photoX, photoY + photoBox / 2 - 4, {
         width: photoBox,
         align: "center",
       });
     }
 
-    doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827");
-    doc.text(fullName, detailsX, y0, { width: detailsW });
+    const textX = photoX + photoBox + innerGapX;
+    const textW = Math.max(10, x0 + w - cardPad - textX);
 
-    doc.font("Helvetica").fontSize(9).fillColor("#111827");
-    doc.text(detailsText, detailsX, y0 + nameH + 4, { width: detailsW, lineGap: 2 });
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#111827");
+    const nameH = doc.heightOfString(fullName, { width: textW });
+    doc.text(fullName, textX, photoY, { width: textW });
 
-    doc.y = y0 + itemH + gapY;
+    doc.font("Helvetica").fontSize(8).fillColor("#111827");
+    const detailsText = detailsLines.filter(Boolean).join("\n");
+    doc.text(detailsText, textX, photoY + nameH + 3, { width: textW, lineGap: 1 });
+  };
+
+  const clubGroups = new Map();
+  for (const p of players) {
+    const key = (p.club?.clubName || "No Club").toString();
+    const arr = clubGroups.get(key) || [];
+    arr.push(p);
+    clubGroups.set(key, arr);
+  }
+
+  const clubNames = Array.from(clubGroups.keys()).sort((a, b) => String(a).localeCompare(String(b)));
+
+  for (const clubName of clubNames) {
+    const clubPlayers = clubGroups.get(clubName) || [];
+
+    doc.font("Helvetica-Bold").fontSize(12);
+    const clubTitleH = doc.heightOfString(String(clubName), { width: contentW });
+    ensureSpace(clubTitleH + 10, null);
+    doc.fillColor("#111827").text(String(clubName), pageLeft, doc.y, { width: contentW });
+    doc.moveDown(0.4);
+
+    for (let i = 0; i < clubPlayers.length; i += 2) {
+      const leftP = clubPlayers[i];
+      const rightP = i + 1 < clubPlayers.length ? clubPlayers[i + 1] : null;
+
+      const measureCardH = (p) => {
+        if (!p) return 0;
+        const fullName = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(" ").trim() || "-";
+        const regionName = p.club?.place?.region?.regionName || "-";
+        const placeName = p.club?.place?.placeName || "-";
+        const locParts = [regionName, placeName].filter((v) => v && v !== "-");
+        const locLine = locParts.length ? locParts.join(" • ") : "-";
+        const detailLines = [
+          `Unique ID: ${p.uniqueIdNumber || "-"}`,
+          `Mobile: ${p.mobile || "-"}`,
+          `Club: ${p.club?.clubName || "-"}`,
+          locLine !== "-" ? locLine : `${regionName} • ${placeName}`,
+          `Aadhaar Verified: ${p.aadharVerified ? "Yes" : "No"}`,
+        ];
+
+        const textW = Math.max(10, cardW - cardPad * 2 - photoBox - innerGapX);
+        doc.font("Helvetica-Bold").fontSize(11);
+        const nameH = doc.heightOfString(fullName, { width: textW });
+        doc.font("Helvetica").fontSize(8);
+        const detailsH = doc.heightOfString(detailLines.join("\n"), { width: textW, lineGap: 1 });
+        return Math.max(photoBox, nameH + 3 + detailsH) + cardPad * 2;
+      };
+
+      const rowH = Math.max(measureCardH(leftP), measureCardH(rightP));
+      ensureSpace(rowH + rowGapY, clubName);
+
+      const y0 = doc.y;
+      drawPlayerCard(leftP, pageLeft, y0, cardW, rowH);
+      if (rightP) {
+        drawPlayerCard(rightP, pageLeft + cardW + gridGapX, y0, cardW, rowH);
+      }
+
+      doc.y = y0 + rowH + rowGapY;
+    }
+
+    doc.moveDown(0.2);
   }
 
   doc.end();
