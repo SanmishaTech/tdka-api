@@ -1169,20 +1169,34 @@ const getClubStats = asyncHandler(async (req, res) => {
 });
 
 const verifyAadharOCR = asyncHandler(async (req, res) => {
-  const aadharNumber = String(req.body?.aadharNumber || "").trim();
-  const filePath = getUploadedFilePath(req, "file") || getUploadedFilePath(req, "aadharImage");
-  const playerId = req.params?.id ? parseInt(req.params.id, 10) : null;
-
-  if (!/^\d{12}$/.test(aadharNumber)) {
-    return res.status(400).json({ errors: { aadharNumber: { type: "validation", message: "Invalid Aadhaar number" } } });
+  if (hasUploadErrors(req)) {
+    return res.status(400).json({ errors: req.uploadErrors });
   }
 
-  if (playerId) {
+  const playerId = req.params?.id ? parseInt(req.params.id, 10) : null;
+  const inputAadharNumber = String(req.body?.aadharNumber || "").trim();
+
+  if (!/^\d{12}$/.test(inputAadharNumber)) {
+    return res
+      .status(400)
+      .json({ errors: { aadharNumber: { type: "validation", message: "Invalid Aadhaar number" } } });
+  }
+
+  const resolveAbsPath = (p) => {
+    if (!p) return null;
+    const normalized = String(p).replace(/\\/g, "/");
+    if (path.isAbsolute(normalized)) return normalized;
+    return path.join(process.cwd(), normalized);
+  };
+
+  let filePathToUse = getUploadedFilePath(req, "file") || getUploadedFilePath(req, "aadharImage");
+  let fileReceived = !!filePathToUse;
+
+  if (!filePathToUse && playerId) {
     const player = await prisma.player.findUnique({
       where: { id: playerId },
-      select: { id: true, aadharNumber: true, clubId: true },
+      select: { id: true, aadharImage: true, clubId: true },
     });
-
     if (!player) throw createError(404, "Player not found");
 
     const role = String(req.user?.role || "").toLowerCase();
@@ -1191,18 +1205,269 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
       throw createError(403, "Forbidden");
     }
 
-    const ok = player.aadharNumber === aadharNumber;
-    return res.json({
-      aadharVerified: ok,
-      mismatchReasons: ok ? [] : ["Aadhar number does not match"],
-      fileReceived: !!filePath,
+    if (!player.aadharImage) {
+      throw createError(400, "Player does not have an Aadhaar image on record. Upload an image to verify.");
+    }
+    filePathToUse = player.aadharImage;
+    fileReceived = false;
+  }
+
+  if (!filePathToUse) {
+    throw createError(400, "Aadhaar image file is required for verification");
+  }
+
+  const CASHFREE_CLIENT_ID = process.env.CASHFREE_CLIENT_ID;
+  const CASHFREE_CLIENT_SECRET = process.env.CASHFREE_CLIENT_SECRET;
+  const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || "2024-12-01";
+  const CASHFREE_BASE_URL_RAW =
+    process.env.CASHFREE_VERIFICATION_BASE_URL ||
+    process.env.CASHFREE_VRS_BASE_URL ||
+    process.env.CASHFREE_BASE_URL ||
+    (process.env.NODE_ENV === "production"
+      ? "https://api.cashfree.com"
+      : "https://sandbox.cashfree.com");
+
+  const CASHFREE_VERIFICATION_BASE_URL = (() => {
+    const raw = String(CASHFREE_BASE_URL_RAW || "").trim().replace(/\/+$/g, "");
+    if (!raw) return raw;
+    return raw.endsWith("/verification") ? raw : `${raw}/verification`;
+  })();
+
+  if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
+    throw createError(500, "Cashfree credentials not configured");
+  }
+  if (!CASHFREE_VERIFICATION_BASE_URL) {
+    throw createError(500, "Cashfree base URL not configured");
+  }
+  if (typeof fetch === "undefined" || typeof FormData === "undefined" || typeof Blob === "undefined") {
+    throw createError(500, "Server runtime does not support required multipart upload primitives");
+  }
+
+  const absPath = resolveAbsPath(filePathToUse);
+  if (!absPath || !fs.existsSync(absPath)) {
+    throw createError(400, "Aadhaar image file not found on server");
+  }
+
+  const fileBuffer = fs.readFileSync(absPath);
+  const origExt = path.extname(absPath) || ".jpg";
+  const safeFilename = `aadhaar${origExt}`;
+  const mimeType = origExt.toLowerCase() === ".png" ? "image/png" : "image/jpeg";
+
+  const verificationId = playerId ? `player_${playerId}_${Date.now()}` : crypto.randomUUID();
+  const requestedDocumentTypeRaw = String(process.env.CASHFREE_BHARAT_OCR_DOCUMENT_TYPE || "AADHAAR_FRONT")
+    .trim()
+    .toUpperCase();
+
+  const documentTypeCandidates = (() => {
+    const base = requestedDocumentTypeRaw || "AADHAAR_FRONT";
+    if (base === "AADHAAR") return ["AADHAAR", "AADHAAR_FRONT", "AADHAAR_BACK"];
+    if (base === "AADHAAR_FRONT") return ["AADHAAR_FRONT", "AADHAAR", "AADHAAR_BACK"];
+    if (base === "AADHAAR_BACK") return ["AADHAAR_BACK", "AADHAAR", "AADHAAR_FRONT"];
+    return [base];
+  })();
+
+  const makeFormData = (documentType) => {
+    const fd = new FormData();
+    fd.append("verification_id", verificationId);
+    fd.append("document_type", documentType);
+    fd.append("file", new Blob([fileBuffer], { type: mimeType }), safeFilename);
+    return fd;
+  };
+
+  let cashfreeResponse;
+  let sentDocumentType = documentTypeCandidates[0] || requestedDocumentTypeRaw || "AADHAAR_FRONT";
+  try {
+    let lastStatus = 500;
+    for (const dt of documentTypeCandidates) {
+      sentDocumentType = dt;
+      const resp = await fetch(`${CASHFREE_VERIFICATION_BASE_URL}/bharat-ocr`, {
+        method: "POST",
+        headers: {
+          "x-api-version": CASHFREE_API_VERSION,
+          "x-client-id": CASHFREE_CLIENT_ID,
+          "x-client-secret": CASHFREE_CLIENT_SECRET,
+        },
+        body: makeFormData(dt),
+      });
+
+      lastStatus = resp.status || 500;
+      cashfreeResponse = await resp.json().catch(() => null);
+      if (resp.ok) break;
+
+      const code = String(cashfreeResponse?.code || "").toLowerCase();
+      if (code !== "document_type_invalid") break;
+    }
+
+    if (!cashfreeResponse || String(cashfreeResponse?.code || "").toLowerCase() === "document_type_invalid") {
+      return res.status(400).json({
+        success: false,
+        provider: "cashfree_bharat_ocr",
+        apiVersion: CASHFREE_API_VERSION,
+        documentTypeSent: sentDocumentType,
+        cashfreeResponse,
+        aadharVerified: false,
+        mismatchReasons: [
+          cashfreeResponse?.message ||
+            cashfreeResponse?.error ||
+            cashfreeResponse?.code ||
+            "Failed to verify Aadhaar via Cashfree",
+        ],
+        fileReceived,
+      });
+    }
+
+    const statusStr = String(cashfreeResponse?.status || "").toUpperCase();
+    if (statusStr !== "VALID" && statusStr !== "INVALID" && statusStr !== "REJECTED" && statusStr !== "PENDING") {
+      return res.status(lastStatus || 500).json({
+        success: false,
+        provider: "cashfree_bharat_ocr",
+        apiVersion: CASHFREE_API_VERSION,
+        documentTypeSent: sentDocumentType,
+        cashfreeResponse,
+        aadharVerified: false,
+        mismatchReasons: [
+          cashfreeResponse?.message ||
+            cashfreeResponse?.error ||
+            cashfreeResponse?.code ||
+            "Failed to verify Aadhaar via Cashfree",
+        ],
+        fileReceived,
+      });
+    }
+  } catch (err) {
+    if (err?.status && err?.message) throw err;
+    throw createError(500, err?.message || "Failed to verify Aadhaar via Cashfree");
+  }
+
+  const normalizeDigits = (val) => (val ?? "").toString().replace(/\D/g, "");
+  const normalizeName = (val) => (val ?? "").toString().trim().toLowerCase().replace(/\s+/g, " ");
+  const normalizeDate = (val) => {
+    const s = (val ?? "").toString().trim();
+    if (!s) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = s.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return "";
+  };
+
+  const inputAadharDigits = normalizeDigits(inputAadharNumber);
+  const documentFields = cashfreeResponse?.document_fields || {};
+
+  const docAadharRaw =
+    documentFields?.aadhaar_number ??
+    documentFields?.aadhar_number ??
+    documentFields?.aadhaar ??
+    documentFields?.document_number ??
+    documentFields?.id_number ??
+    documentFields?.uid ??
+    documentFields?.uid_number;
+  const docAadharDigits = normalizeDigits(docAadharRaw);
+
+  const docNameRaw = documentFields?.name ?? documentFields?.full_name ?? documentFields?.holder_name;
+  const docName = normalizeName(docNameRaw);
+
+  const docDobRaw = documentFields?.dob ?? documentFields?.date_of_birth ?? documentFields?.birth_date;
+  const docDob = normalizeDate(docDobRaw);
+
+  let aadharNumberMatch = true;
+  let nameMatch = true;
+  let dobMatch = true;
+  const mismatchReasons = [];
+
+  if (docAadharDigits.length === 12) {
+    aadharNumberMatch = docAadharDigits === inputAadharDigits;
+  } else if (docAadharDigits.length >= 4) {
+    aadharNumberMatch = inputAadharDigits.endsWith(docAadharDigits);
+  } else {
+    aadharNumberMatch = false;
+  }
+  if (!aadharNumberMatch) mismatchReasons.push("Aadhar number does not match");
+
+  if (playerId) {
+    const player = await prisma.player.findUnique({
+      where: { id: playerId },
+      select: {
+        firstName: true,
+        lastName: true,
+        dateOfBirth: true,
+        aadharNumber: true,
+        clubId: true,
+      },
+    });
+    if (!player) throw createError(404, "Player not found");
+
+    const role = String(req.user?.role || "").toLowerCase();
+    const clubIdFromUser = await resolveClubIdFromReqUser(req);
+    if (role !== "admin" && clubIdFromUser && player.clubId && player.clubId !== clubIdFromUser) {
+      throw createError(403, "Forbidden");
+    }
+
+    const playerAadharDigits = normalizeDigits(player.aadharNumber);
+    if (playerAadharDigits && inputAadharDigits && playerAadharDigits !== inputAadharDigits) {
+      aadharNumberMatch = false;
+      if (!mismatchReasons.includes("Aadhar number does not match")) {
+        mismatchReasons.push("Aadhar number does not match");
+      }
+    }
+
+    if (!docName) {
+      nameMatch = false;
+      mismatchReasons.push("Name does not match");
+    } else {
+      const docTokens = docName.split(" ");
+      const firstMatch = player.firstName ? docTokens.includes(String(player.firstName).toLowerCase()) : false;
+      const lastMatch = player.lastName ? docTokens.includes(String(player.lastName).toLowerCase()) : false;
+      nameMatch = firstMatch && lastMatch;
+      if (!nameMatch) mismatchReasons.push("Name does not match");
+    }
+
+    if (!docDob) {
+      dobMatch = false;
+      mismatchReasons.push("Date of birth does not match");
+    } else {
+      const playerDobStr = player.dateOfBirth ? player.dateOfBirth.toISOString().split("T")[0] : "";
+      dobMatch = !!playerDobStr && playerDobStr === docDob;
+      if (!dobMatch) mismatchReasons.push("Date of birth does not match");
+    }
+  } else {
+    if (!docName) {
+      nameMatch = false;
+      mismatchReasons.push("Name does not match");
+    }
+    if (!docDob) {
+      dobMatch = false;
+      mismatchReasons.push("Date of birth does not match");
+    }
+  }
+
+  const ocrStatus = String(
+    cashfreeResponse?.status || cashfreeResponse?.verification_status || cashfreeResponse?.ocr_status || ""
+  ).toUpperCase();
+  const ocrValid = ocrStatus === "VALID";
+
+  const allMatch = aadharNumberMatch && nameMatch && dobMatch;
+  const aadharVerified = ocrValid && allMatch;
+
+  if (playerId && aadharVerified) {
+    await prisma.player.update({
+      where: { id: playerId },
+      data: { aadharVerified: true },
     });
   }
 
-  return res.json({
-    aadharVerified: false,
-    mismatchReasons: ["Aadhar number does not match"],
-    fileReceived: !!filePath,
+  return res.status(200).json({
+    success: true,
+    provider: "cashfree_bharat_ocr",
+    apiVersion: CASHFREE_API_VERSION,
+    documentTypeSent: sentDocumentType,
+    cashfreeResponse,
+    aadharVerified,
+    mismatchReasons,
+    fileReceived,
+    aadharNumberMatch,
+    nameMatch,
+    dobMatch,
+    allMatch,
   });
 });
 
