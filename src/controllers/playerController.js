@@ -211,6 +211,7 @@ const getPlayers = asyncHandler(async (req, res) => {
     limit = 10,
     search = "",
     clubId,
+    groupId,
     isSuspended,
     aadharVerified,
     sortBy = "id",
@@ -252,6 +253,14 @@ const getPlayers = asyncHandler(async (req, res) => {
     if (!where.clubId) {
       where.clubId = parsedClubId;
     }
+  }
+
+  if (!isBlankish(groupId)) {
+    const parsedGroupId = parseInt(String(groupId), 10);
+    if (Number.isNaN(parsedGroupId)) {
+      throw createError(400, "Invalid group ID");
+    }
+    where.groups = { some: { id: parsedGroupId } };
   }
 
   if (search) {
@@ -351,6 +360,7 @@ const exportPlayers = asyncHandler(async (req, res) => {
   const {
     search = "",
     clubId,
+    groupId,
     isSuspended,
     aadharVerified,
     sortBy = "id",
@@ -384,6 +394,14 @@ const exportPlayers = asyncHandler(async (req, res) => {
     if (!where.clubId) {
       where.clubId = parsedClubId;
     }
+  }
+
+  if (!isBlankish(groupId)) {
+    const parsedGroupId = parseInt(String(groupId), 10);
+    if (Number.isNaN(parsedGroupId)) {
+      throw createError(400, "Invalid group ID");
+    }
+    where.groups = { some: { id: parsedGroupId } };
   }
 
   if (search) {
@@ -482,6 +500,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
   const {
     search = "",
     clubId,
+    groupId,
     isSuspended,
     aadharVerified,
     sortBy = "id",
@@ -514,6 +533,14 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     if (!where.clubId) {
       where.clubId = parsedClubId;
     }
+  }
+
+  if (!isBlankish(groupId)) {
+    const parsedGroupId = parseInt(String(groupId), 10);
+    if (Number.isNaN(parsedGroupId)) {
+      throw createError(400, "Invalid group ID");
+    }
+    where.groups = { some: { id: parsedGroupId } };
   }
 
   if (search) {
@@ -701,6 +728,8 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     const mobile = p.mobile || "-";
     const uniqueIdNumber = p.uniqueIdNumber || "-";
     const aadharVerifiedText = p.aadharVerified ? "Yes" : "No";
+
+    const dobText = p.dateOfBirth ? new Date(p.dateOfBirth).toISOString().split("T")[0] : "-";
     const formattedAadhaar = formatAadhaarNumber(p.aadharNumber);
     const aadhaarLine = formattedAadhaar ? `Aadhaar: ${formattedAadhaar}` : "Aadhaar: Not available";
 
@@ -709,6 +738,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
 
     const detailsLines = [
       `Unique ID: ${uniqueIdNumber}`,
+      `DOB: ${dobText}`,
       `Mobile: ${mobile}`,
       `Club: ${clubName}`,
       locLine !== "-" ? locLine : `${regionName} • ${placeName}`,
@@ -791,10 +821,12 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
         const placeName = p.club?.place?.placeName || "-";
         const locParts = [regionName, placeName].filter((v) => v && v !== "-");
         const locLine = locParts.length ? locParts.join(" • ") : "-";
+        const dobText = p.dateOfBirth ? new Date(p.dateOfBirth).toISOString().split("T")[0] : "-";
         const formattedAadhaar = formatAadhaarNumber(p.aadharNumber);
         const aadhaarLine = formattedAadhaar ? `Aadhaar: ${formattedAadhaar}` : "Aadhaar: Not available";
         const detailLines = [
           `Unique ID: ${p.uniqueIdNumber || "-"}`,
+          `DOB: ${dobText}`,
           `Mobile: ${p.mobile || "-"}`,
           `Club: ${p.club?.clubName || "-"}`,
           locLine !== "-" ? locLine : `${regionName} • ${placeName}`,
