@@ -16,12 +16,17 @@ const playerRoutes = require("./routes/player");
 const regionRoutes = require("./routes/region");
 const placeRoutes = require("./routes/place");
 const refereeRoutes = require("./routes/referee");
+const activityLogRoutes = require("./routes/activityLog");
 const authRoutes = require("./routes/auth");
 const swaggerRouter = require("./swagger");
+
+const { withRequestContext } = require("./middleware/activityLogContext");
 
 const app = express();
 
 app.use(morgan("dev"));
+
+app.use(withRequestContext);
 
 app.use(
   helmet({
@@ -90,6 +95,7 @@ app.use("/api/players", playerRoutes);
 app.use("/api/regions", regionRoutes);
 app.use("/api/places", placeRoutes);
 app.use("/api/referees", refereeRoutes);
+app.use("/api/activity-logs", activityLogRoutes);
 app.use(swaggerRouter);
 
 app.get("*", (req, res, next) => {

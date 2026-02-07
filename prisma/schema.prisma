@@ -225,3 +225,23 @@ model CompetitionRegistration {
   @@map("competition_registrations")
 }
 
+model ActivityLog {
+  id         Int      @id @default(autoincrement())
+  action     String
+  entityType String
+  entityId   String?
+  actorRole  String?
+  actorName  String?
+  actorEmail String?
+  actorId    String?
+  ipAddress  String?
+  userAgent  String?
+  changes    String?  @db.LongText
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([actorEmail])
+  @@map("activity_logs")
+}
+

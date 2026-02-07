@@ -1,4 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
+const prisma = require("../config/db");
 const asyncHandler = require("express-async-handler");
 const createError = require("http-errors");
 const ExcelJS = require("exceljs");
@@ -13,8 +13,6 @@ try {
 } catch (_) {
   sharp = null;
 }
-
-const prisma = new PrismaClient();
 
 // ... rest of the code remains the same ...
 

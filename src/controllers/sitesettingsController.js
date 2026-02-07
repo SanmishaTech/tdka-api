@@ -8,8 +8,7 @@
  * @module controllers/siteSettingsController
  */
 
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("../config/db");
 const { z } = require("zod");
 const validateRequest = require("../utils/validateRequest"); // Assuming this utility exists based on userController
 

@@ -1,6 +1,5 @@
 const createError = require("http-errors");
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("../config/db");
 const validateRequest = require("../utils/validateRequest");
 const { z } = require("zod");
 

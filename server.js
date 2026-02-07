@@ -1,6 +1,7 @@
 const app = require('./src/app');
 const { startObserverCleanupJob } = require('./src/jobs/observerCleanup');
 const { startRefereeCleanupJob } = require('./src/jobs/refereeCleanup');
+const { startActivityLogCleanupJob } = require('./src/jobs/activityLogCleanup');
 
 const port = process.env.PORT || 3000;
 
@@ -12,4 +13,6 @@ app.listen(port, () => {
   // startObserverCleanupJob(12); 
   // Start background job: runs every 24 hours to clean up expired referees
   startRefereeCleanupJob(86_400_000);
+  // Start background job: runs every 24 hours to delete old activity logs (set ACTIVITY_LOG_RETENTION_DAYS in .env)
+  startActivityLogCleanupJob(86_400_000);
 });
