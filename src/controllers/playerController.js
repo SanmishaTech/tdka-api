@@ -687,6 +687,12 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     }
   };
 
+  const formatAadhaarNumber = (value) => {
+    const digits = String(value || "").replace(/\D/g, "");
+    if (digits.length !== 12) return null;
+    return `${digits.slice(0, 4)}-${digits.slice(4, 8)}-${digits.slice(8, 12)}`;
+  };
+
   const drawPlayerCard = async (p, x0, y0, w, h) => {
     const fullName = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(" ").trim() || "-";
     const clubName = p.club?.clubName || "-";
@@ -695,6 +701,8 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     const mobile = p.mobile || "-";
     const uniqueIdNumber = p.uniqueIdNumber || "-";
     const aadharVerifiedText = p.aadharVerified ? "Yes" : "No";
+    const formattedAadhaar = formatAadhaarNumber(p.aadharNumber);
+    const aadhaarLine = formattedAadhaar ? `Aadhaar: ${formattedAadhaar}` : "Aadhaar: Not available";
 
     const locParts = [regionName, placeName].filter((v) => v && v !== "-");
     const locLine = locParts.length ? locParts.join(" • ") : "-";
@@ -705,6 +713,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
       `Club: ${clubName}`,
       locLine !== "-" ? locLine : `${regionName} • ${placeName}`,
       `Aadhaar Verified: ${aadharVerifiedText}`,
+      aadhaarLine,
     ];
 
     doc.rect(x0, y0, w, h).lineWidth(1).stroke(borderColor);
@@ -782,12 +791,15 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
         const placeName = p.club?.place?.placeName || "-";
         const locParts = [regionName, placeName].filter((v) => v && v !== "-");
         const locLine = locParts.length ? locParts.join(" • ") : "-";
+        const formattedAadhaar = formatAadhaarNumber(p.aadharNumber);
+        const aadhaarLine = formattedAadhaar ? `Aadhaar: ${formattedAadhaar}` : "Aadhaar: Not available";
         const detailLines = [
           `Unique ID: ${p.uniqueIdNumber || "-"}`,
           `Mobile: ${p.mobile || "-"}`,
           `Club: ${p.club?.clubName || "-"}`,
           locLine !== "-" ? locLine : `${regionName} • ${placeName}`,
           `Aadhaar Verified: ${p.aadharVerified ? "Yes" : "No"}`,
+          aadhaarLine,
         ];
 
         const textW = Math.max(10, cardW - cardPad * 2 - photoBox - innerGapX);

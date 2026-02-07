@@ -62,7 +62,7 @@ const getClubs = asyncHandler(async (req, res) => {
     ? {
         OR: [
           { clubName: { contains: search } },
-          { affiliationNumber: { contains: search } },
+          { email: { contains: search } },
         ],
       }
     : {};
