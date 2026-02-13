@@ -330,7 +330,8 @@ const getCompetition = asyncHandler(async (req, res) => {
 
   // Format groups to include the joined data nicely
   const formattedGroups = competition.groups.map(cg => ({
-    id: cg.groupId,
+    id: cg.groupId, // Keeps compatibility (this identifies the Group, not the join record)
+    groupId: cg.groupId, // Add explicit groupId for clarity in frontend
     groupName: cg.group.groupName,
     gender: cg.group.gender,
     age: cg.group.age,
