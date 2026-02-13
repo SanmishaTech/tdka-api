@@ -610,7 +610,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
   const logoPath = resolveTDKALogoPath();
   const primaryRed = "#dc2626";
   const headerLineColor = "#000000";
-  const assocName = "THANE JILHA KABADDI ASSOCIATION";
+  const assocName = "THANE DISTRICT KABADDI ASSOCIATION";
 
   let clubNameForHeader = null;
   if (where.clubId) {

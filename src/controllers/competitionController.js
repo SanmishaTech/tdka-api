@@ -1434,7 +1434,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     }
   }
 
-  const assocName = 'THANE JILHA KABADDI ASSOCIATION';
+  const assocName = 'THANE DISTRICT KABADDI ASSOCIATION';
   const assocLine1 = `Office: ${safeText(clubLocation)}`;
   const assocLine2 = `Phone: ${safeText(club.mobile)}   Email: ${safeText(club.email)}`;
 
@@ -3035,7 +3035,7 @@ const generateMeritCertificatePDF = asyncHandler(async (req, res) => {
       .font('Helvetica-Bold')
       .fontSize(24)
       .fillColor('#111827')
-      .text('THANE JILHA KABADDI ASSOCIATION', left, top + 28, { width: contentW, align: 'center' });
+      .text('THANE DISTRICT KABADDI ASSOCIATION', left, top + 28, { width: contentW, align: 'center' });
 
     doc
       .font('Helvetica-Bold')
