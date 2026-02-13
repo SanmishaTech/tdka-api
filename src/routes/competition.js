@@ -75,6 +75,15 @@ router.get("/:id/clubs/:clubId/pdf", auth, competitionController.generateClubCom
 // Get players for a specific club in a competition
 router.get("/:id/clubs/:clubId/players", auth, competitionController.getClubPlayersInCompetition);
 
+// Set captain for a registration
+router.put("/:id/clubs/:clubId/players/:registrationId/captain", auth, competitionController.setCaptain);
+
+// Get club info (manager and coach names) for a competition
+router.get("/:id/clubs/:clubId/info", auth, competitionController.getCompetitionClubInfo);
+
+// Update club info (manager and coach names) for a competition
+router.put("/:id/clubs/:clubId/info", auth, competitionController.updateCompetitionClubInfo);
+
 /**
  * @swagger
  * /competitions/{id}:
@@ -138,6 +147,10 @@ router.get("/:id", auth, competitionController.getCompetition);
  *                 type: string
  *                 description: Last date for entries
  *                 example: "2025-07-31"
+              address:
+                type: string
+                description: Venue address
+                example: "123 Stadium Road, Sports City"
  *     responses:
  *       201:
  *         description: Competition created successfully
@@ -184,6 +197,9 @@ router.post("/", auth, competitionController.createCompetition);
  *               lastEntryDate:
  *                 type: string
  *                 description: Last date for entries
+              address:
+                type: string
+                description: Venue address
  *     responses:
  *       200:
  *         description: Competition updated successfully

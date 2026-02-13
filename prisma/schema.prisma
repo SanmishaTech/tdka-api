@@ -160,6 +160,7 @@ model Competition{
   lastEntryDate    String
   ageEligibilityDate String?  // Reference date for age calculations
   weight           String?
+  address          String?   @db.Text
   rules            String?   @db.Text  // Competition rules as rich text
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -185,6 +186,7 @@ model Player {
   motherName       String?
   dateOfBirth      DateTime
   position         String?
+  chestNumber      String?   // Chest number for tournament identification
   address          String
   mobile           String
   aadharNumber     String    @unique
@@ -210,6 +212,9 @@ model CompetitionRegistration {
   clubId           Int       // Foreign key to Club
   registeredBy     String    // Email of the user who registered the player
   status           String    @default("registered") // registered, confirmed, cancelled
+  captain          Boolean   @default(false) // Is this player the captain of the team
+  managerName      String?   // Manager name for this club in this competition
+  coachName        String?   // Coach name for this club in this competition
   registrationDate DateTime  @default(now())
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

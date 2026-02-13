@@ -195,7 +195,7 @@ const getCompetitions = asyncHandler(async (req, res) => {
 
     // Prefer computed label from eligibility date if available
     const ageLabel = computeUnderAgeLabel(comp.ageEligibilityDate) || comp.age;
-    
+
     return {
       id: comp.id,
       competitionName: comp.competitionName,
@@ -282,7 +282,7 @@ const getCompetition = asyncHandler(async (req, res) => {
       },
     },
   });
-  
+
   if (!competition) throw createError(404, "Competition not found");
 
   // Observers may only access their assigned competition
@@ -335,6 +335,7 @@ const getCompetition = asyncHandler(async (req, res) => {
     lastEntryDate: competition.lastEntryDate,
     ageEligibilityDate: competition.ageEligibilityDate,
     weight: competition.weight,
+    address: competition.address,
     rules: competition.rules,
     createdAt: competition.createdAt,
     updatedAt: competition.updatedAt,
@@ -359,6 +360,7 @@ const createCompetition = asyncHandler(async (req, res) => {
     lastEntryDate: z.string().min(1, "Last entry date is required").max(255),
     ageEligibilityDate: z.string().min(1, "Age eligibility date is required").max(255).optional(),
     weight: z.string().max(255).optional(),
+    address: z.string().optional(),
     rules: z.string().optional(),
   });
 
@@ -373,10 +375,10 @@ const createCompetition = asyncHandler(async (req, res) => {
     const w = normalizedCompetitionData.weight.trim();
     normalizedCompetitionData.weight = w.length > 0 ? w : null;
   }
-  
+
   // Prefer computing age label from eligibility date; fallback to first group's age
   let age = computeUnderAgeLabel(competitionData.ageEligibilityDate) || "Multiple groups";
-  
+
   if (!age && groups && groups.length > 0) {
     // Try to get the first group's details if possible
     try {
@@ -393,7 +395,7 @@ const createCompetition = asyncHandler(async (req, res) => {
   }
 
   // Create the competition with the groups and clubs relationships
-  const competition = await prisma.competition.create({ 
+  const competition = await prisma.competition.create({
     data: {
       ...normalizedCompetitionData,
       age: age,
@@ -419,7 +421,7 @@ const updateCompetition = asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) throw createError(400, "Invalid competition ID");
 
-const schema = z
+  const schema = z
     .object({
       competitionName: z.string().min(1).max(255).optional(),
       maxPlayers: z
@@ -434,6 +436,7 @@ const schema = z
       lastEntryDate: z.string().min(1).max(255).optional(),
       ageEligibilityDate: z.string().min(1).max(255).optional(),
       weight: z.string().max(255).optional(),
+      address: z.string().optional(),
       rules: z.string().optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
@@ -442,16 +445,16 @@ const schema = z
 
   const validatedData = await schema.parseAsync(req.body);
 
-  const existing = await prisma.competition.findUnique({ 
+  const existing = await prisma.competition.findUnique({
     where: { id },
     include: { groups: true, clubs: true }
   });
-  
+
   if (!existing) throw createError(404, "Competition not found");
 
   // Extract groups and clubs for separate handling if present
   const { groups, clubs, ...competitionData } = validatedData;
-  
+
   // Update data object for Prisma
   const updateData = { ...competitionData };
 
@@ -465,12 +468,12 @@ const schema = z
   if (ageFromEligibility) {
     updateData.age = ageFromEligibility;
   }
-  
+
   // Update age and groups if provided
   if (groups && groups.length > 0) {
     // For backward compatibility, store the first group's age as the competition age
     let age = "Multiple groups";
-    
+
     try {
       const firstGroup = await prisma.group.findFirst({
         where: { id: parseInt(groups[0]) },
@@ -482,12 +485,12 @@ const schema = z
     } catch (error) {
       console.error("Error fetching group details:", error);
     }
-    
+
     // Update age only if not already set from eligibility date
     if (!updateData.age) {
       updateData.age = age;
     }
-    
+
     // Update groups relationship
     updateData.groups = {
       // Disconnect all existing groups
@@ -1123,6 +1126,7 @@ const getRegisteredPlayers = asyncHandler(async (req, res) => {
       id: reg.id,
       registrationDate: reg.registrationDate,
       status: reg.status,
+      captain: reg.captain,
       player: {
         id: reg.player.id,
         name: `${reg.player.firstName} ${reg.player.lastName}`,
@@ -1210,7 +1214,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   console.log('PDF generation endpoint hit');
   console.log('Params:', req.params);
   console.log('User:', req.user);
-  
+
   const competitionId = parseInt(req.params.id);
   const clubId = parseInt(req.params.clubId);
 
@@ -1273,6 +1277,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
           lastName: true,
           dateOfBirth: true,
           position: true,
+          chestNumber: true,
           mobile: true,
           aadharNumber: true,
           aadharVerified: true,
@@ -1288,7 +1293,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
   });
 
   // Create PDF document with better margins
-  const doc = new PDFDocument({ 
+  const doc = new PDFDocument({
     margin: 40,
     size: 'A4',
     info: {
@@ -1298,14 +1303,14 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
       Keywords: 'competition, registration, players, club'
     }
   });
-  
+
   // Set response headers for inline viewing
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${club.clubName}_${competition.competitionName}_Details.pdf"`);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
-  
+
   // Pipe PDF to response
   doc.pipe(res);
 
@@ -1513,9 +1518,8 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     sr: 30,
     name: 190,
     chest: 60,
-    appr: 100,
     dob: 70,
-    mem: tableW - (30 + 190 + 60 + 100 + 70),
+    mem: tableW - (30 + 190 + 60 + 70),
   };
 
   const drawCell = (text, x, y0, w, h, opts = {}) => {
@@ -1546,8 +1550,6 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     x += colW.name;
     drawCell('Chest No', x, y, colW.chest, h, { bold: true, align: 'center', size: 9 });
     x += colW.chest;
-    drawCell('Approved / Rejected', x, y, colW.appr, h, { bold: true, align: 'center', size: 9 });
-    x += colW.appr;
     drawCell('Birth Date', x, y, colW.dob, h, { bold: true, align: 'center', size: 9 });
     x += colW.dob;
     drawCell('Membership\nNo.', x, y, colW.mem, h, { bold: true, align: 'center', size: 9 });
@@ -1580,10 +1582,8 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     x += colW.sr;
     drawCell(fullName, x, y, colW.name, rowHeight);
     x += colW.name;
-    drawCell(String(idx + 1), x, y, colW.chest, rowHeight, { align: 'center' });
+    drawCell(p.chestNumber || '-', x, y, colW.chest, rowHeight, { align: 'center' });
     x += colW.chest;
-    drawCell('Yes/No', x, y, colW.appr, rowHeight, { align: 'center' });
-    x += colW.appr;
     drawCell(formatDateDMY(p.dateOfBirth), x, y, colW.dob, rowHeight, { align: 'center' });
     x += colW.dob;
     drawCell(membershipNo, x, y, colW.mem, rowHeight, { align: 'center' });
@@ -1605,9 +1605,20 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     y += bottomRowH;
   };
 
-  drawBottomLine('Name of the Captain:', '');
-  drawBottomLine('Name of the Manager:', '');
-  drawBottomLine('Name of the Coach:', '');
+  // Find captain from registrations
+  const captainRegistration = registrations.find(reg => reg.captain === true);
+  const captainName = captainRegistration 
+    ? [captainRegistration.player.firstName, captainRegistration.player.middleName, captainRegistration.player.lastName].filter(Boolean).join(' ').toUpperCase()
+    : '';
+
+  // Get manager and coach names from any registration (they're the same for all registrations in a club)
+  const anyRegistration = registrations.find(reg => reg.managerName || reg.coachName);
+  const managerName = anyRegistration?.managerName || '';
+  const coachName = anyRegistration?.coachName || '';
+
+  drawBottomLine('Name of the Captain:', captainName);
+  drawBottomLine('Name of the Manager:', managerName);
+  drawBottomLine('Name of the Coach:', coachName);
 
   y += 6;
   const note =
@@ -1841,6 +1852,7 @@ const getClubPlayersInCompetition = asyncHandler(async (req, res) => {
     id: reg.id,
     registrationDate: reg.registrationDate,
     status: reg.status,
+    captain: reg.captain,
     player: {
       id: reg.player.id,
       name: `${reg.player.firstName} ${reg.player.middleName ? reg.player.middleName + ' ' : ''}${reg.player.lastName}`,
@@ -1858,6 +1870,180 @@ const getClubPlayersInCompetition = asyncHandler(async (req, res) => {
     totalRegistrations: formattedRegistrations.length,
     competition: competition,
     club: club
+  });
+});
+
+// Set captain for a competition registration
+const setCaptain = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  const clubId = parseInt(req.params.clubId);
+  const registrationId = parseInt(req.params.registrationId);
+
+  if (!competitionId || !clubId || !registrationId) {
+    throw createError(400, "Invalid competition ID, club ID, or registration ID");
+  }
+
+  // Get user's club ID from auth
+  let userClubId = null;
+  if (req.user) {
+    if (req.user.role === 'clubadmin' && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === 'CLUB') {
+      const clubAdminUser = await prisma.user.findFirst({
+        where: { email: req.user.email, role: 'clubadmin' },
+        select: { clubId: true },
+      });
+      if (clubAdminUser?.clubId) userClubId = clubAdminUser.clubId;
+    } else if (req.user.role === 'admin') {
+      // Admin can set captain for any club
+      userClubId = clubId;
+    }
+  }
+
+  if (!userClubId || userClubId !== clubId) {
+    throw createError(403, "Access denied - you can only set captain for your own club");
+  }
+
+  // First, unset any existing captain for this club in this competition
+  await prisma.competitionRegistration.updateMany({
+    where: {
+      competitionId: competitionId,
+      clubId: clubId,
+      captain: true
+    },
+    data: { captain: false }
+  });
+
+  // Set the new captain
+  const registration = await prisma.competitionRegistration.update({
+    where: {
+      id: registrationId,
+      competitionId: competitionId,
+      clubId: clubId
+    },
+    data: { captain: true },
+    include: {
+      player: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true
+        }
+      }
+    }
+  });
+
+  if (!registration) {
+    throw createError(404, "Registration not found");
+  }
+
+  res.json({
+    message: `${registration.player.firstName} ${registration.player.lastName} is now the captain`,
+    registration: {
+      id: registration.id,
+      captain: registration.captain,
+      player: registration.player
+    }
+  });
+});
+
+// Get competition club info (manager and coach names)
+const getCompetitionClubInfo = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  const clubId = parseInt(req.params.clubId);
+
+  if (!competitionId || !clubId) {
+    throw createError(400, "Invalid competition ID or club ID");
+  }
+
+  // Check permissions
+  let userClubId = null;
+  if (req.user) {
+    if (req.user.role === 'clubadmin' && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === 'CLUB') {
+      const clubAdminUser = await prisma.user.findFirst({
+        where: { email: req.user.email, role: 'clubadmin' },
+        select: { clubId: true },
+      });
+      if (clubAdminUser?.clubId) userClubId = clubAdminUser.clubId;
+    } else if (req.user.role === 'admin') {
+      userClubId = clubId;
+    }
+  }
+
+  if (!userClubId || userClubId !== clubId) {
+    throw createError(403, "Access denied");
+  }
+
+  // Get any registration for this club in this competition to get manager/coach
+  const registration = await prisma.competitionRegistration.findFirst({
+    where: {
+      competitionId: competitionId,
+      clubId: clubId
+    }
+  });
+
+  res.json({
+    managerName: registration?.managerName || '',
+    coachName: registration?.coachName || ''
+  });
+});
+
+// Update competition club info (manager and coach names)
+const updateCompetitionClubInfo = asyncHandler(async (req, res) => {
+  const competitionId = parseInt(req.params.id);
+  const clubId = parseInt(req.params.clubId);
+
+  if (!competitionId || !clubId) {
+    throw createError(400, "Invalid competition ID or club ID");
+  }
+
+  // Check permissions
+  let userClubId = null;
+  if (req.user) {
+    if (req.user.role === 'clubadmin' && req.user.clubId) {
+      userClubId = req.user.clubId;
+    } else if (req.user.role === 'CLUB') {
+      const clubAdminUser = await prisma.user.findFirst({
+        where: { email: req.user.email, role: 'clubadmin' },
+        select: { clubId: true },
+      });
+      if (clubAdminUser?.clubId) userClubId = clubAdminUser.clubId;
+    } else if (req.user.role === 'admin') {
+      userClubId = clubId;
+    }
+  }
+
+  if (!userClubId || userClubId !== clubId) {
+    throw createError(403, "Access denied");
+  }
+
+  const schema = z.object({
+    managerName: z.string().max(255, "Manager name must not exceed 255 characters").optional(),
+    coachName: z.string().max(255, "Coach name must not exceed 255 characters").optional(),
+  });
+
+  const { managerName, coachName } = await schema.parseAsync(req.body);
+
+  // Update all registrations for this club in this competition
+  await prisma.competitionRegistration.updateMany({
+    where: {
+      competitionId: competitionId,
+      clubId: clubId
+    },
+    data: {
+      managerName: managerName || null,
+      coachName: coachName || null
+    }
+  });
+
+  res.json({
+    message: "Manager and coach information updated successfully",
+    clubInfo: {
+      managerName: managerName || null,
+      coachName: coachName || null
+    }
   });
 });
 
@@ -1963,38 +2149,38 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
   // Header
   doc.rect(40, 40, doc.page.width - 80, 80).fill(primaryColor);
   doc.fontSize(22).font('Helvetica-Bold').fillColor('white')
-     .text('PARTICIPATING CLUBS', 60, 70, { align: 'center' });
+    .text('PARTICIPATING CLUBS', 60, 70, { align: 'center' });
   doc.y = 140;
   doc.fillColor('black');
-  
+
   // Competition info
   const leftCol = 60;
   const rightCol = 320;
   const lineHeight = 18;
   doc.rect(40, doc.y, doc.page.width - 80, 25).fill(lightGray);
   doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
-     .text(' COMPETITION INFORMATION', 50, doc.y + 8);
+    .text(' COMPETITION INFORMATION', 50, doc.y + 8);
   doc.y += 35;
   doc.fillColor('black');
-  
+
   // Row: Competition Name
   let rowY = doc.y;
   doc.fontSize(11).font('Helvetica-Bold').text('Competition Name:', leftCol, rowY);
   doc.font('Helvetica').text(competition.competitionName, leftCol + 130, rowY);
   doc.y = rowY + lineHeight;
-  
+
   // Row: Competition Period
   rowY = doc.y;
   doc.font('Helvetica-Bold').text('Competition Period:', leftCol, rowY);
   doc.font('Helvetica').text(`${formatDate(competition.fromDate)} to ${formatDate(competition.toDate)}`, leftCol + 130, rowY);
   doc.y = rowY + lineHeight;
-  
+
   // Row: Age Category (left) and Last Entry Date (right) on same line
   rowY = doc.y;
   doc.font('Helvetica-Bold').text('Age Category:', leftCol, rowY);
   const pdfAgeLabel = computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age;
   doc.font('Helvetica').text(pdfAgeLabel, leftCol + 130, rowY);
-  
+
   doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, rowY);
   doc.font('Helvetica').text(formatDate(competition.lastEntryDate), rightCol + 100, rowY);
   doc.y = rowY + lineHeight;
@@ -2004,7 +2190,7 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
   // Clubs table section header
   doc.rect(40, doc.y, doc.page.width - 80, 25).fill(lightGray);
   doc.fontSize(16).font('Helvetica-Bold').fillColor(darkGray)
-     .text(` PARTICIPATING CLUBS (${competition.clubs.length})`, 50, doc.y + 8);
+    .text(` PARTICIPATING CLUBS (${competition.clubs.length})`, 50, doc.y + 8);
   doc.y += 35;
   doc.fillColor('black');
 
@@ -2029,11 +2215,11 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
   doc.fillColor('black');
 
   // Rows
-  const clubs = [...competition.clubs].sort((a,b) => a.clubName.localeCompare(b.clubName));
+  const clubs = [...competition.clubs].sort((a, b) => a.clubName.localeCompare(b.clubName));
   if (clubs.length === 0) {
     doc.rect(60, currentY, doc.page.width - 120, 50).stroke('#e2e8f0');
     doc.fontSize(12).font('Helvetica').fillColor(secondaryColor)
-       .text('No clubs have joined this competition yet.', 0, currentY + 18, { align: 'center' });
+      .text('No clubs have joined this competition yet.', 0, currentY + 18, { align: 'center' });
     doc.fillColor('black');
   } else {
     clubs.forEach((club, index) => {
@@ -2075,7 +2261,7 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
   doc.rect(40, footerY, doc.page.width - 80, 40).fill('#f8fafc').stroke('#e2e8f0');
   doc.fontSize(8).font('Helvetica').fillColor(secondaryColor);
   doc.text('TDKA Competition Management System', 50, footerY + 8);
-  doc.text(`Generated on: ${new Date().toLocaleString('en-US', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' })}`, 50, footerY + 20);
+  doc.text(`Generated on: ${new Date().toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 50, footerY + 20);
 
   doc.end();
 });
@@ -2644,7 +2830,7 @@ const generateMeritCertificatePDF = asyncHandler(async (req, res) => {
         x: 0.80,
         y: 0.195,
         w: 0.15,
-        h: 0.24,  
+        h: 0.24,
         inset: -5,
       },
       name: {
@@ -2916,6 +3102,9 @@ module.exports = {
   generateCompetitionClubsPDF,
   generateMeritCertificatePDF,
   getClubPlayersInCompetition,
+  setCaptain,
+  getCompetitionClubInfo,
+  updateCompetitionClubInfo,
   getObserverForCompetition,
   updateObserverForCompetition,
   setObserverForCompetition,
