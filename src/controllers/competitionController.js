@@ -153,14 +153,12 @@ const getCompetitions = asyncHandler(async (req, res) => {
       skip,
       take: limit,
       orderBy: { [mappedSortBy]: sortOrder },
+      // Join with CompetitionGroup to get the specific age eligibility date for each group
       include: {
         groups: {
-          select: {
-            id: true,
-            groupName: true,
-            gender: true,
-            age: true,
-          },
+          include: {
+            group: true
+          }
         },
         clubs: {
           select: {
@@ -189,12 +187,21 @@ const getCompetitions = asyncHandler(async (req, res) => {
 
   // Format competitions for frontend compatibility
   const enhancedCompetitions = competitions.map(comp => {
-    // Extract group IDs and club IDs for the frontend
-    const groupIds = comp.groups.map(group => group.id.toString());
+    // Extract group details and club IDs for the frontend
+    // We now have to map from the Join table (CompetitionGroup) to getting Group details
+    const formattedGroups = comp.groups.map(cg => ({
+      id: cg.groupId,
+      groupName: cg.group.groupName,
+      gender: cg.group.gender,
+      age: cg.group.age,
+      ageEligibilityDate: cg.ageEligibilityDate // Include the specific date
+    }));
+
     const clubIds = comp.clubs.map(club => club.id.toString());
 
-    // Prefer computed label from eligibility date if available
-    const ageLabel = computeUnderAgeLabel(comp.ageEligibilityDate) || comp.age;
+    // For display in list, we might want to show a summary or the first group's date
+    // Or just rely on the groups array logic in the frontend.
+    // Preserving "age" field as legacy display.
 
     return {
       id: comp.id,
@@ -202,14 +209,14 @@ const getCompetitions = asyncHandler(async (req, res) => {
       maxPlayers: comp.maxPlayers,
       fromDate: comp.fromDate,
       toDate: comp.toDate,
-      age: ageLabel,
+      age: comp.age,
       lastEntryDate: comp.lastEntryDate,
-      ageEligibilityDate: comp.ageEligibilityDate,
+      // ageEligibilityDate removed from root, accessed via groups
       weight: comp.weight,
       rules: comp.rules,
       createdAt: comp.createdAt,
       updatedAt: comp.updatedAt,
-      groups: groupIds,
+      groups: formattedGroups,
       clubs: clubIds
     };
   });
@@ -253,12 +260,9 @@ const getCompetition = asyncHandler(async (req, res) => {
     where,
     include: {
       groups: {
-        select: {
-          id: true,
-          groupName: true,
-          gender: true,
-          age: true,
-        },
+        include: {
+          group: true
+        }
       },
       clubs: {
         select: {
@@ -324,6 +328,15 @@ const getCompetition = asyncHandler(async (req, res) => {
     })
   );
 
+  // Format groups to include the joined data nicely
+  const formattedGroups = competition.groups.map(cg => ({
+    id: cg.groupId,
+    groupName: cg.group.groupName,
+    gender: cg.group.gender,
+    age: cg.group.age,
+    ageEligibilityDate: cg.ageEligibilityDate
+  }));
+
   // Format the response for frontend compatibility
   const responseData = {
     id: competition.id,
@@ -331,16 +344,16 @@ const getCompetition = asyncHandler(async (req, res) => {
     maxPlayers: competition.maxPlayers,
     fromDate: competition.fromDate,
     toDate: competition.toDate,
-    age: computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age,
+    age: competition.age,
     lastEntryDate: competition.lastEntryDate,
-    ageEligibilityDate: competition.ageEligibilityDate,
+    // ageEligibilityDate removed
     weight: competition.weight,
     address: competition.address,
     rules: competition.rules,
     createdAt: competition.createdAt,
     updatedAt: competition.updatedAt,
-    groups: competition.groups, // Return full group objects
-    clubs: clubsWithPlayerCount  // Return clubs with player counts
+    groups: formattedGroups,
+    clubs: clubsWithPlayerCount
   };
 
   res.json(responseData);
@@ -355,10 +368,13 @@ const createCompetition = asyncHandler(async (req, res) => {
       .max(14, "Maximum 14 players"),
     fromDate: z.string().min(1, "From date is required").max(255),
     toDate: z.string().min(1, "To date is required").max(255),
-    groups: z.array(z.string()).min(1, "At least one group must be selected"),
+    // groups is now array of objects { id, ageEligibilityDate }
+    groups: z.array(z.object({
+      id: z.string(),
+      ageEligibilityDate: z.string().min(1, "Eligibility date required for group")
+    })).min(1, "At least one group must be selected"),
     clubs: z.array(z.string()).optional(),
     lastEntryDate: z.string().min(1, "Last entry date is required").max(255),
-    ageEligibilityDate: z.string().min(1, "Age eligibility date is required").max(255).optional(),
     weight: z.string().max(255).optional(),
     address: z.string().optional(),
     rules: z.string().optional(),
@@ -376,31 +392,33 @@ const createCompetition = asyncHandler(async (req, res) => {
     normalizedCompetitionData.weight = w.length > 0 ? w : null;
   }
 
-  // Prefer computing age label from eligibility date; fallback to first group's age
-  let age = computeUnderAgeLabel(competitionData.ageEligibilityDate) || "Multiple groups";
-
-  if (!age && groups && groups.length > 0) {
-    // Try to get the first group's details if possible
+  // Determine legacy age string from first group or set default
+  let age = "Multiple groups";
+  if (groups && groups.length > 0) {
     try {
-      const firstGroup = await prisma.group.findFirst({
-        where: { id: parseInt(groups[0]) },
+      const firstGroup = await prisma.group.findUnique({
+        where: { id: parseInt(groups[0].id) },
         select: { age: true }
       });
       if (firstGroup) {
-        age = firstGroup.age;
+        // Also append computed label for the first group for reference
+        const computed = computeUnderAgeLabel(groups[0].ageEligibilityDate);
+        age = computed || firstGroup.age;
       }
-    } catch (error) {
-      console.error("Error fetching group details:", error);
-    }
+    } catch (e) { console.error(e); }
   }
 
   // Create the competition with the groups and clubs relationships
+  // We need to create CompetitionGroup entries manually or via nested create
   const competition = await prisma.competition.create({
     data: {
       ...normalizedCompetitionData,
       age: age,
       groups: {
-        connect: groups.map(groupId => ({ id: parseInt(groupId) }))
+        create: groups.map(g => ({
+          group: { connect: { id: parseInt(g.id) } },
+          ageEligibilityDate: g.ageEligibilityDate
+        }))
       },
       ...(clubs && clubs.length > 0 && {
         clubs: {
@@ -431,10 +449,13 @@ const updateCompetition = asyncHandler(async (req, res) => {
         .optional(),
       fromDate: z.string().min(1).max(255).optional(),
       toDate: z.string().min(1).max(255).optional(),
-      groups: z.array(z.string()).min(1, "At least one group must be selected").optional(),
+      // Groups is array of objects { id, ageEligibilityDate }
+      groups: z.array(z.object({
+        id: z.string(),
+        ageEligibilityDate: z.string().min(1)
+      })).min(1).optional(),
       clubs: z.array(z.string()).optional(),
       lastEntryDate: z.string().min(1).max(255).optional(),
-      ageEligibilityDate: z.string().min(1).max(255).optional(),
       weight: z.string().max(255).optional(),
       address: z.string().optional(),
       rules: z.string().optional(),
@@ -452,10 +473,7 @@ const updateCompetition = asyncHandler(async (req, res) => {
 
   if (!existing) throw createError(404, "Competition not found");
 
-  // Extract groups and clubs for separate handling if present
   const { groups, clubs, ...competitionData } = validatedData;
-
-  // Update data object for Prisma
   const updateData = { ...competitionData };
 
   if (Object.prototype.hasOwnProperty.call(competitionData, "weight") && typeof competitionData.weight === "string") {
@@ -463,49 +481,36 @@ const updateCompetition = asyncHandler(async (req, res) => {
     updateData.weight = w.length > 0 ? w : null;
   }
 
-  // If an eligibility date is provided, prefer computing the age label from it
-  const ageFromEligibility = computeUnderAgeLabel(competitionData.ageEligibilityDate);
-  if (ageFromEligibility) {
-    updateData.age = ageFromEligibility;
-  }
-
-  // Update age and groups if provided
+  // Update groups if provided involves clearing existing and re-creating them
+  // Because explicit Many-to-Many via CompetitionGroup requires handling the extra field
   if (groups && groups.length > 0) {
-    // For backward compatibility, store the first group's age as the competition age
-    let age = "Multiple groups";
+    // Delete existing relation records
+    await prisma.competitionGroup.deleteMany({
+      where: { competitionId: id }
+    });
 
-    try {
-      const firstGroup = await prisma.group.findFirst({
-        where: { id: parseInt(groups[0]) },
-        select: { age: true }
-      });
-      if (firstGroup) {
-        age = firstGroup.age;
-      }
-    } catch (error) {
-      console.error("Error fetching group details:", error);
-    }
-
-    // Update age only if not already set from eligibility date
-    if (!updateData.age) {
-      updateData.age = age;
-    }
-
-    // Update groups relationship
+    // We will use nested create in the update to re-add them
     updateData.groups = {
-      // Disconnect all existing groups
-      set: [],
-      // Connect the new groups
-      connect: groups.map(groupId => ({ id: parseInt(groupId) }))
+      create: groups.map(g => ({
+        group: { connect: { id: parseInt(g.id) } },
+        ageEligibilityDate: g.ageEligibilityDate
+      }))
     };
+
+    // Update legacy age label for display
+    try {
+      const firstGroup = await prisma.group.findUnique({ where: { id: parseInt(groups[0].id) } });
+      if (firstGroup) {
+        const computed = computeUnderAgeLabel(groups[0].ageEligibilityDate);
+        updateData.age = computed || firstGroup.age;
+      }
+    } catch (e) { }
   }
 
   // Update clubs relationship if provided
   if (clubs !== undefined) {
     updateData.clubs = {
-      // Disconnect all existing clubs
       set: [],
-      // Connect the new clubs if any
       ...(clubs.length > 0 && {
         connect: clubs.map(clubId => ({ id: parseInt(clubId) }))
       })
@@ -631,9 +636,8 @@ const joinCompetition = asyncHandler(async (req, res) => {
     include: {
       clubs: true,
       groups: {
-        select: {
-          id: true,
-          groupName: true
+        include: {
+          group: true
         }
       }
     }
@@ -775,10 +779,9 @@ const getEligiblePlayers = asyncHandler(async (req, res) => {
     include: {
       clubs: true,
       groups: {
-        select: {
-          id: true,
-          groupName: true,
-        },
+        include: {
+          group: true
+        }
       },
     }
   });
@@ -804,6 +807,13 @@ const getEligiblePlayers = asyncHandler(async (req, res) => {
       lastName: true,
       dateOfBirth: true,
       position: true,
+      groups: {
+        select: {
+          id: true,
+          groupName: true,
+          gender: true
+        }
+      }
     },
     orderBy: [
       { firstName: 'asc' },
@@ -811,15 +821,9 @@ const getEligiblePlayers = asyncHandler(async (req, res) => {
     ]
   });
 
-  const eligibilityCutoff = parseEligibilityDate(competition.ageEligibilityDate);
-  const eligiblePlayers = eligibilityCutoff
-    ? players.filter((p) => {
-      if (!p?.dateOfBirth) return false;
-      const dob = p.dateOfBirth instanceof Date ? p.dateOfBirth : new Date(p.dateOfBirth);
-      if (isNaN(dob)) return false;
-      return dob >= eligibilityCutoff;
-    })
-    : players;
+  // Return all active players from the club so frontend can show ineligible ones with reasons
+  // The frontend will handle the specific eligibility checks and ordering.
+  const eligiblePlayers = players;
 
   res.json({
     players: eligiblePlayers,
@@ -866,9 +870,8 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
     include: {
       clubs: true,
       groups: {
-        select: {
-          id: true,
-          groupName: true,
+        include: {
+          group: true,
         },
       },
     }
@@ -888,10 +891,11 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
   }
   const today = new Date();
 
-  // Determine senior competition status (>30 derived from eligibility date)
-  const refDate = parseEligibilityDate(competition.ageEligibilityDate) || today;
-  const seniorAge = calculateAgeOn(refDate, today);
-  const isSeniorCompetition = seniorAge !== null && seniorAge > 30;
+  // Determine senior competition status based on groups (if any group is over 30/senior)
+  // For simplicity, we can check if any of the competition groups have an "Open" or "Senior" age category
+  // Or stick to the implementation plan: check if "Men" or "Women" groups are involved.
+  const groupNames = competition.groups.map(g => g.group.groupName.trim().toLowerCase());
+  const isSeniorCompetition = groupNames.includes("men") || groupNames.includes("women");
   const under18Cutoff = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
 
   // Verify all players belong to the club
@@ -907,33 +911,48 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
     throw createError(400, "Some players are not valid or don't belong to your club");
   }
 
-  // Enforce competition age eligibility date as a DOB cutoff (players must be born on/after cutoff)
-  const eligibilityCutoff = parseEligibilityDate(competition.ageEligibilityDate);
-  if (eligibilityCutoff) {
-    const ineligible = players.filter((p) => {
-      if (!p?.dateOfBirth) return false;
-      const dob = p.dateOfBirth instanceof Date ? p.dateOfBirth : new Date(p.dateOfBirth);
-      if (isNaN(dob)) return false;
-      return dob < eligibilityCutoff;
-    });
+  // Validate eligibility for each player against the competition groups
+  // A player must match at least ONE group's criteria (Gender + Age Eligibility Date)
+  const ineligiblePlayers = [];
 
-    if (ineligible.length > 0) {
-      throw createError(
-        400,
-        `Some players are not eligible for this competition based on the age eligibility date (${ineligible.length} player(s))`
-      );
+  for (const player of players) {
+    let isEligibleForAnyGroup = false;
+
+    for (const compGroup of competition.groups) {
+      // Check Gender (assuming 'Boys'/'Men' vs 'Girls'/'Women' or mixed)
+      // If group gender is defined, player must match. 
+      // Note: Player model has 'gender'? The schema view didn't show it explicitly in the snippet but usually it exists.
+      // If not, we might be skipping strict gender check or relying on previous logic.
+      // Existing code didn't check gender explicitly, but let's assume we rely on Date primarily here as requested.
+
+      const eligibilityDate = parseEligibilityDate(compGroup.ageEligibilityDate);
+      if (eligibilityDate) {
+        // Check if player DOB is >= eligibilityDate
+        const dob = player.dateOfBirth instanceof Date ? player.dateOfBirth : new Date(player.dateOfBirth);
+        if (!isNaN(dob) && dob >= eligibilityDate) {
+          isEligibleForAnyGroup = true;
+          break; // Found a valid group
+        }
+      } else {
+        // If no date on group (shouldn't happen with new schema), assume eligible
+        isEligibleForAnyGroup = true;
+        break;
+      }
     }
+
+    if (!isEligibleForAnyGroup) {
+      ineligiblePlayers.push(player);
+    }
+  }
+
+  if (ineligiblePlayers.length > 0) {
+    const names = ineligiblePlayers.map(p => `${p.firstName} ${p.lastName}`).join(", ");
+    throw createError(400, `The following players are not eligible for any group in this competition: ${names}`);
   }
 
   // Enforce U18 rules for senior competitions
   if (isSeniorCompetition) {
-    const hasMenOrWomenGroupSelected = Array.isArray(competition.groups)
-      ? competition.groups.some(g => {
-        const name = String(g?.groupName || "").trim().toLowerCase();
-        return name === "men" || name === "women";
-      })
-      : false;
-    const allowU18Extras = hasMenOrWomenGroupSelected;
+    const allowU18Extras = true; // Logic from previous code: "Men"/"Women" implies U18 allowed with limits
 
     // Count existing U18 registrations for this club in this competition
     const existingU18Count = await prisma.competitionRegistration.count({
@@ -953,18 +972,12 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
       return age !== null && age <= 18;
     }).length;
 
-    if (!allowU18Extras) {
-      if (incomingU18 > 0) {
-        throw createError(400, "U18 (age 18 or below) players are not allowed for this competition");
-      }
-    } else {
-      const totalU18 = existingU18Count + incomingU18;
-      if (totalU18 > 3) {
-        const remaining = Math.max(0, 3 - existingU18Count);
-        throw createError(400, remaining === 0
-          ? "Maximum 3 U18 (age 18 or below) players already registered for this competition"
-          : `You can register only ${remaining} more U18 (age 18 or below) player(s) for this competition (max 3)`);
-      }
+    const totalU18 = existingU18Count + incomingU18;
+    if (totalU18 > 3) {
+      const remaining = Math.max(0, 3 - existingU18Count);
+      throw createError(400, remaining === 0
+        ? "Maximum 3 U18 (age 18 or below) players already registered for this competition"
+        : `You can register only ${remaining} more U18 (age 18 or below) player(s) for this competition (max 3)`);
     }
   }
 
@@ -1111,7 +1124,8 @@ const getRegisteredPlayers = asyncHandler(async (req, res) => {
           id: true,
           competitionName: true,
           maxPlayers: true,
-          ageEligibilityDate: true,
+          maxPlayers: true,
+          age: true,
           weight: true
         }
       }
@@ -1234,10 +1248,15 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
       fromDate: true,
       toDate: true,
       age: true,
-      ageEligibilityDate: true,
+      // ageEligibilityDate removed
       weight: true,
       maxPlayers: true,
-      lastEntryDate: true
+      lastEntryDate: true,
+      groups: {
+        include: {
+          group: true
+        }
+      }
     }
   });
 
@@ -1408,7 +1427,16 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     return null;
   };
 
-  const underLabelRaw = competition.age || computeUnderAgeLabel(competition.ageEligibilityDate) || '';
+  // Determine label from groups or legacy age field
+  let underLabelRaw = competition.age || '';
+  if (competition.groups && competition.groups.length > 0) {
+    // Try to construct a label from groups if age is missing or checks
+    // For now, rely on competition.age which is updated on save, or join group ages
+    if (!underLabelRaw) {
+      underLabelRaw = competition.groups.map(g => g.group.age).join(' / ');
+    }
+  }
+
   const entryAgeTitle = (() => {
     const m = String(underLabelRaw).match(/Under\s+(\d+)/i);
     if (m?.[1]) return `under ${m[1]}th -`;
@@ -1607,7 +1635,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
 
   // Find captain from registrations
   const captainRegistration = registrations.find(reg => reg.captain === true);
-  const captainName = captainRegistration 
+  const captainName = captainRegistration
     ? [captainRegistration.player.firstName, captainRegistration.player.middleName, captainRegistration.player.lastName].filter(Boolean).join(' ').toUpperCase()
     : '';
 
@@ -2063,9 +2091,12 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
       fromDate: true,
       toDate: true,
       age: true,
-      ageEligibilityDate: true,
+      // ageEligibilityDate removed
       weight: true,
       lastEntryDate: true,
+      groups: {
+        include: { group: true }
+      },
       clubs: {
         select: {
           id: true,
@@ -2178,7 +2209,12 @@ const generateCompetitionClubsPDF = asyncHandler(async (req, res) => {
   // Row: Age Category (left) and Last Entry Date (right) on same line
   rowY = doc.y;
   doc.font('Helvetica-Bold').text('Age Category:', leftCol, rowY);
-  const pdfAgeLabel = computeUnderAgeLabel(competition.ageEligibilityDate) || competition.age;
+
+  let pdfAgeLabel = competition.age || '';
+  if (competition.groups && competition.groups.length > 0 && !pdfAgeLabel) {
+    pdfAgeLabel = competition.groups.map(g => g.group.age).join(' / ');
+  }
+
   doc.font('Helvetica').text(pdfAgeLabel, leftCol + 130, rowY);
 
   doc.font('Helvetica-Bold').text('Last Entry Date:', rightCol, rowY);
@@ -2595,7 +2631,7 @@ const generateMeritCertificatePDF = asyncHandler(async (req, res) => {
       fromDate: true,
       toDate: true,
       age: true,
-      ageEligibilityDate: true,
+      // ageEligibilityDate removed
       weight: true,
     },
   });

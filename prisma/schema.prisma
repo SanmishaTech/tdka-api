@@ -117,7 +117,7 @@ model Group{
   age              String    
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
-  competitions     Competition[]
+  competitions     CompetitionGroup[]
   players          Player[]
   @@map("groups")
 }
@@ -156,25 +156,42 @@ model Competition{
   maxPlayers       Int
   fromDate         String
   toDate           String
-  age              String
+  age              String?   // Legacy/Display label
   lastEntryDate    String
-  ageEligibilityDate String?  // Reference date for age calculations
+  // ageEligibilityDate removed - moved to CompetitionGroup
   weight           String?
   address          String?   @db.Text
-  rules            String?   @db.Text  // Competition rules as rich text
+  rules            String?   @db.Text
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
-  groups           Group[]
+  
+  // Relations
+  groups           CompetitionGroup[]
   clubs            Club[]
   registrations    CompetitionRegistration[]
   
-  // Observer assigned to this competition (only one observer per competition)
   observerId       Int?
   observer         User?     @relation("CompetitionObserver", fields: [observerId], references: [id], onDelete: SetNull)
 
-  // Referee assigned to this competition (only one referee per competition)
   refereeId        Int?
   referee          User?     @relation("CompetitionReferee", fields: [refereeId], references: [id], onDelete: SetNull)
+}
+
+model CompetitionGroup {
+  id                 Int         @id @default(autoincrement())
+  competitionId      Int
+  groupId            Int
+  ageEligibilityDate String      // Specific cutoff date for this group in this competition
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  competition        Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  group              Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([competitionId, groupId])
+  @@index([competitionId])
+  @@index([groupId])
+  @@map("competition_groups")
 }
 
 model Player {
