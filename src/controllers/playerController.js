@@ -212,6 +212,7 @@ const getPlayers = asyncHandler(async (req, res) => {
     search = "",
     clubId,
     groupId,
+    regionId,
     isSuspended,
     aadharVerified,
     sortBy = "id",
@@ -261,6 +262,19 @@ const getPlayers = asyncHandler(async (req, res) => {
       throw createError(400, "Invalid group ID");
     }
     where.groups = { some: { id: parsedGroupId } };
+  }
+
+  // Filter by region - players whose club's place belongs to this region
+  if (!isBlankish(regionId)) {
+    const parsedRegionId = parseInt(String(regionId), 10);
+    if (Number.isNaN(parsedRegionId)) {
+      throw createError(400, "Invalid region ID");
+    }
+    where.club = {
+      place: {
+        regionId: parsedRegionId,
+      },
+    };
   }
 
   if (search) {
@@ -361,6 +375,7 @@ const exportPlayers = asyncHandler(async (req, res) => {
     search = "",
     clubId,
     groupId,
+    regionId,
     isSuspended,
     aadharVerified,
     sortBy = "id",
@@ -402,6 +417,19 @@ const exportPlayers = asyncHandler(async (req, res) => {
       throw createError(400, "Invalid group ID");
     }
     where.groups = { some: { id: parsedGroupId } };
+  }
+
+  // Filter by region - players whose club's place belongs to this region
+  if (!isBlankish(regionId)) {
+    const parsedRegionId = parseInt(String(regionId), 10);
+    if (Number.isNaN(parsedRegionId)) {
+      throw createError(400, "Invalid region ID");
+    }
+    where.club = {
+      place: {
+        regionId: parsedRegionId,
+      },
+    };
   }
 
   if (search) {
@@ -501,6 +529,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
     search = "",
     clubId,
     groupId,
+    regionId,
     isSuspended,
     aadharVerified,
     sortBy = "id",
@@ -541,6 +570,19 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
       throw createError(400, "Invalid group ID");
     }
     where.groups = { some: { id: parsedGroupId } };
+  }
+
+  // Filter by region - players whose club's place belongs to this region
+  if (!isBlankish(regionId)) {
+    const parsedRegionId = parseInt(String(regionId), 10);
+    if (Number.isNaN(parsedRegionId)) {
+      throw createError(400, "Invalid region ID");
+    }
+    where.club = {
+      place: {
+        regionId: parsedRegionId,
+      },
+    };
   }
 
   if (search) {

@@ -123,6 +123,7 @@ model Group{
   updatedAt        DateTime  @updatedAt
   competitions     CompetitionGroup[]
   players          Player[]
+  competitionRegistrations CompetitionRegistration[]
   @@map("groups")
 }
 
@@ -232,11 +233,12 @@ model CompetitionRegistration {
   competitionId    Int       // Foreign key to Competition
   playerId         Int       // Foreign key to Player
   clubId           Int       // Foreign key to Club
+  groupId          Int?      // Which group this player is registered under
   registeredBy     String    // Email of the user who registered the player
   status           String    @default("registered") // registered, confirmed, cancelled
   captain          Boolean   @default(false) // Is this player the captain of the team
-  managerName      String?   // Manager name for this club in this competition
-  coachName        String?   // Coach name for this club in this competition
+  managerName      String?   // Manager name for this group in this competition
+  coachName        String?   // Coach name for this group in this competition
   registrationDate DateTime  @default(now())
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -244,11 +246,13 @@ model CompetitionRegistration {
   competition      Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   player           Player      @relation(fields: [playerId], references: [id], onDelete: Cascade)
   club             Club        @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  group            Group?      @relation(fields: [groupId], references: [id], onDelete: SetNull)
   
-  @@unique([competitionId, playerId]) // Prevent duplicate registrations
+  @@unique([competitionId, playerId, groupId]) // Prevent duplicate registrations per group
   @@index([competitionId])
   @@index([playerId])
   @@index([clubId])
+  @@index([groupId])
   @@map("competition_registrations")
 }
 

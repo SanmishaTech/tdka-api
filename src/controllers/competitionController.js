@@ -924,25 +924,105 @@ const getEligiblePlayers = asyncHandler(async (req, res) => {
     ]
   });
 
-  // Return all active players from the club so frontend can show ineligible ones with reasons
-  // The frontend will handle the specific eligibility checks and ordering.
-  const eligiblePlayers = players;
+  // Get groupId from query params (optional)
+  const groupId = req.query.groupId ? parseInt(req.query.groupId) : null;
+
+  // Find the specific competition group if groupId is provided
+  const targetGroup = groupId
+    ? competition.groups.find(g => g.groupId === groupId)
+    : null;
+
+  // Mark each player with eligible status
+  const playersWithEligibility = players.map(player => {
+    let eligible = false;
+    let reason = "";
+
+    if (targetGroup) {
+      // Check gender: player must belong to a group with matching gender
+      const targetGender = (targetGroup.group?.gender || "").toLowerCase().trim();
+      const playerHasMatchingGender = player.groups.some(
+        pg => (pg.gender || "").toLowerCase().trim() === targetGender
+      );
+
+      if (!playerHasMatchingGender) {
+        return { ...player, eligible: false, reason: `Gender does not match group '${targetGroup.group?.groupName || "Unknown"}' (requires ${targetGender})` };
+      }
+
+      // Check age eligibility
+      if (targetGroup.ageEligibilityDate) {
+        const dob = new Date(player.dateOfBirth);
+        const cutoff = new Date(targetGroup.ageEligibilityDate);
+        const ageType = targetGroup.ageType || targetGroup.group?.ageType || "UNDER";
+
+        if (ageType === "ABOVE") {
+          // Must be born ON or BEFORE cutoff (older)
+          if (dob > cutoff) {
+            return { ...player, eligible: false, reason: `Too young - must be born on or before ${cutoff.toISOString().split('T')[0]}` };
+          }
+        } else {
+          // UNDER: Must be born ON or AFTER cutoff (younger)
+          if (dob < cutoff) {
+            return { ...player, eligible: false, reason: `Too old - must be born on or after ${cutoff.toISOString().split('T')[0]}` };
+          }
+        }
+      }
+
+      eligible = true;
+    } else {
+      // No specific group selected - check against ALL competition groups
+      const qualifyingGroups = competition.groups.filter(group => {
+        const groupGender = (group.group?.gender || "").toLowerCase().trim();
+        const playerHasGender = player.groups.some(
+          pg => (pg.gender || "").toLowerCase().trim() === groupGender
+        );
+        if (!playerHasGender) return false;
+
+        if (group.ageEligibilityDate) {
+          const dob = new Date(player.dateOfBirth);
+          const cutoff = new Date(group.ageEligibilityDate);
+          const ageType = group.ageType || group.group?.ageType || "UNDER";
+
+          if (ageType === "ABOVE") {
+            return dob <= cutoff;
+          } else {
+            return dob >= cutoff;
+          }
+        }
+        return true;
+      });
+
+      eligible = qualifyingGroups.length > 0;
+      if (!eligible) {
+        reason = "Does not meet gender/age criteria for any group in this competition";
+      }
+    }
+
+    return { ...player, eligible, reason };
+  });
+
+  // Sort: eligible first, then ineligible
+  playersWithEligibility.sort((a, b) => {
+    if (a.eligible && !b.eligible) return -1;
+    if (!a.eligible && b.eligible) return 1;
+    return (a.firstName || "").localeCompare(b.firstName || "");
+  });
 
   res.json({
-    players: eligiblePlayers,
-    totalPlayers: eligiblePlayers.length,
+    players: playersWithEligibility,
+    totalPlayers: playersWithEligibility.length,
   });
 });
 
 // Add players to competition
 const addPlayersToCompetition = asyncHandler(async (req, res) => {
   const competitionId = parseInt(req.params.id);
-  const { playerIds } = req.body;
+  const { playerIds, groupId, captainId } = req.body;
 
   if (!competitionId) throw createError(400, "Invalid competition ID");
   if (!playerIds || !Array.isArray(playerIds) || playerIds.length === 0) {
     throw createError(400, "Player IDs are required");
   }
+  if (!groupId) throw createError(400, "Group ID is required");
 
   let userClubId = null;
 
@@ -982,6 +1062,13 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
 
   if (!competition) throw createError(404, "Competition not found");
 
+  // Validate that this group is part of the competition
+  const parsedGroupId = parseInt(groupId);
+  const targetCompGroup = competition.groups.find(g => g.groupId === parsedGroupId);
+  if (!targetCompGroup) {
+    throw createError(400, "This group is not part of this competition");
+  }
+
   // Check if club is part of this competition
   const hasAccess = competition.clubs.some(club => club.id === userClubId);
   if (!hasAccess) {
@@ -1014,51 +1101,35 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
     throw createError(400, "Some players are not valid or don't belong to your club");
   }
 
-  // Validate eligibility for each player against the competition groups
-  // A player must match at least ONE group's criteria (Gender + Age Eligibility Date)
+  // Validate eligibility for each player against the TARGET group
   const ineligiblePlayers = [];
 
   for (const player of players) {
-    let isEligibleForAnyGroup = false;
+    let isEligible = false;
+    const eligibilityDate = new Date(targetCompGroup.ageEligibilityDate);
+    const ageType = targetCompGroup.group.ageType || "UNDER";
 
-    for (const compGroup of competition.groups) {
-      // Check Gender - assuming strict gender match if needed, but previously was loose.
-      // Now integrating Age Type logic
-      const eligibilityDate = new Date(compGroup.ageEligibilityDate); // Direct parse, assuming formatted string
-      const ageType = compGroup.group.ageType || "UNDER"; // Default to UNDER if missing
-
-      if (!isNaN(eligibilityDate.getTime())) {
-        const dob = new Date(player.dateOfBirth);
-        if (!isNaN(dob.getTime())) {
-          if (ageType === "UNDER") {
-            // Must be born ON or AFTER eligibility date (Younger)
-            if (dob >= eligibilityDate) {
-              isEligibleForAnyGroup = true;
-              break;
-            }
-          } else if (ageType === "ABOVE") {
-            // Must be born ON or BEFORE eligibility date (Older)
-            if (dob <= eligibilityDate) {
-              isEligibleForAnyGroup = true;
-              break;
-            }
-          }
+    if (!isNaN(eligibilityDate.getTime())) {
+      const dob = new Date(player.dateOfBirth);
+      if (!isNaN(dob.getTime())) {
+        if (ageType === "UNDER") {
+          if (dob >= eligibilityDate) isEligible = true;
+        } else if (ageType === "ABOVE") {
+          if (dob <= eligibilityDate) isEligible = true;
         }
-      } else {
-        // Fallback if date is invalid (shouldn't happen)
-        isEligibleForAnyGroup = true;
-        break;
       }
+    } else {
+      isEligible = true; // No date = open group
     }
 
-    if (!isEligibleForAnyGroup) {
+    if (!isEligible) {
       ineligiblePlayers.push(player);
     }
   }
 
   if (ineligiblePlayers.length > 0) {
     const names = ineligiblePlayers.map(p => `${p.firstName} ${p.lastName}`).join(", ");
-    throw createError(400, `The following players are not eligible for any group in this competition: ${names}`);
+    throw createError(400, `The following players are not eligible for group '${targetCompGroup.group.groupName}': ${names}`);
   }
 
   // Enforce U18 rules for senior competitions
@@ -1097,16 +1168,18 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
     competitionId: competitionId,
     playerId: player.id,
     clubId: userClubId,
+    groupId: parsedGroupId,
     registeredBy: req.user.email,
     status: 'registered'
   }));
 
   // Use transaction to ensure all registrations are created atomically
   const registrations = await prisma.$transaction(async (tx) => {
-    // Check for existing registrations to avoid duplicates
+    // Check for existing registrations for this group to avoid duplicates
     const existingRegistrations = await tx.competitionRegistration.findMany({
       where: {
         competitionId: competitionId,
+        groupId: parsedGroupId,
         playerId: { in: playerIds.map(id => parseInt(id)) }
       }
     });
@@ -1115,21 +1188,22 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
     const newRegistrations = registrationData.filter(reg => !existingPlayerIds.includes(reg.playerId));
 
     if (newRegistrations.length === 0) {
-      throw createError(400, "All selected players are already registered for this competition");
+      throw createError(400, "All selected players are already registered for this group");
     }
 
-    // Enforce max players when adding incrementally
+    // Enforce max players per group when adding incrementally
     const currentCount = await tx.competitionRegistration.count({
       where: {
         competitionId: competitionId,
         clubId: userClubId,
+        groupId: parsedGroupId,
       },
     });
     if (currentCount + newRegistrations.length > competition.maxPlayers) {
       const remaining = Math.max(0, competition.maxPlayers - currentCount);
       throw createError(400, remaining === 0
-        ? `Maximum ${competition.maxPlayers} players already registered`
-        : `You can register only ${remaining} more player(s). Maximum ${competition.maxPlayers} allowed`);
+        ? `Maximum ${competition.maxPlayers} players already registered for this group`
+        : `You can register only ${remaining} more player(s) for this group. Maximum ${competition.maxPlayers} allowed`);
     }
 
     // Create new registrations
@@ -1137,10 +1211,36 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
       data: newRegistrations
     });
 
+    // Set captain if captainId is provided
+    if (captainId) {
+      const parsedCaptainId = parseInt(captainId);
+      // Unset any existing captain for this club+group+competition
+      await tx.competitionRegistration.updateMany({
+        where: {
+          competitionId: competitionId,
+          clubId: userClubId,
+          groupId: parsedGroupId,
+          captain: true,
+        },
+        data: { captain: false },
+      });
+      // Set captain on the matching registration
+      await tx.competitionRegistration.updateMany({
+        where: {
+          competitionId: competitionId,
+          clubId: userClubId,
+          groupId: parsedGroupId,
+          playerId: parsedCaptainId,
+        },
+        data: { captain: true },
+      });
+    }
+
     // Fetch the created registrations with related data
     return await tx.competitionRegistration.findMany({
       where: {
         competitionId: competitionId,
+        groupId: parsedGroupId,
         playerId: { in: newRegistrations.map(reg => reg.playerId) }
       },
       include: {
@@ -1230,11 +1330,19 @@ const getRegisteredPlayers = asyncHandler(async (req, res) => {
           position: true,
         }
       },
+      group: {
+        select: {
+          id: true,
+          groupName: true,
+          gender: true,
+          age: true,
+          ageType: true,
+        }
+      },
       competition: {
         select: {
           id: true,
           competitionName: true,
-          maxPlayers: true,
           maxPlayers: true,
           age: true,
           weight: true
@@ -1252,6 +1360,10 @@ const getRegisteredPlayers = asyncHandler(async (req, res) => {
       registrationDate: reg.registrationDate,
       status: reg.status,
       captain: reg.captain,
+      groupId: reg.groupId,
+      group: reg.group,
+      managerName: reg.managerName,
+      coachName: reg.coachName,
       player: {
         id: reg.player.id,
         name: `${reg.player.firstName} ${reg.player.lastName}`,
@@ -1350,6 +1462,10 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     throw createError(400, "Invalid competition ID or club ID");
   }
 
+  console.log(`[PDF DEBUG] Generating PDF. Comp: ${competitionId}, Club: ${clubId}, Group: ${req.query.groupId}`);
+
+  console.log(`[PDF DEBUG] Generating PDF for Comp: ${competitionId}, Club: ${clubId}, Group: ${req.query.groupId || 'All'}`);
+
   // Fetch competition details
   const competition = await prisma.competition.findUnique({
     where: { id: competitionId },
@@ -1391,12 +1507,32 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     throw createError(404, "Club not found");
   }
 
+  // Check if filtering by group
+  const groupId = req.query.groupId ? parseInt(req.query.groupId) : null;
+  let groupName = "";
+
+  if (groupId) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      select: { groupName: true }
+    });
+    if (group) {
+      groupName = group.groupName;
+    }
+  }
+
   // Fetch registered players for this club in this competition
+  const where = {
+    competitionId: competitionId,
+    clubId: clubId
+  };
+
+  if (groupId) {
+    where.groupId = groupId;
+  }
+
   const registrations = await prisma.competitionRegistration.findMany({
-    where: {
-      competitionId: competitionId,
-      clubId: clubId
-    },
+    where,
     include: {
       player: {
         select: {
@@ -1422,12 +1558,14 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     }
   });
 
+  console.log(`[PDF DEBUG] Found ${registrations.length} registrations`);
+
   // Create PDF document with better margins
   const doc = new PDFDocument({
     margin: 40,
     size: 'A4',
     info: {
-      Title: `${club.clubName} - ${competition.competitionName} Registration Details`,
+      Title: `${club.clubName} - ${competition.competitionName} ${groupName ? `(${groupName}) ` : ''}Registration Details`,
       Author: 'TDKA Competition Management System',
       Subject: 'Competition Registration Details',
       Keywords: 'competition, registration, players, club'
@@ -1544,7 +1682,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
     // Try to construct a label from groups if age is missing or checks
     // For now, rely on competition.age which is updated on save, or join group ages
     if (!underLabelRaw) {
-      underLabelRaw = competition.groups.map(g => g.group.age).join(' / ');
+      underLabelRaw = competition.groups.map(g => g.group?.age || '').filter(Boolean).join(' / ');
     }
   }
 
@@ -1920,6 +2058,7 @@ const generateClubCompetitionPDF = asyncHandler(async (req, res) => {
 
   renderPlayersGrid();
 
+  console.log('[PDF DEBUG] Rendered grid. Calling doc.end()');
   doc.end();
 });
 
@@ -1992,6 +2131,7 @@ const getClubPlayersInCompetition = asyncHandler(async (req, res) => {
     registrationDate: reg.registrationDate,
     status: reg.status,
     captain: reg.captain,
+    groupId: reg.groupId,
     player: {
       id: reg.player.id,
       name: `${reg.player.firstName} ${reg.player.middleName ? reg.player.middleName + ' ' : ''}${reg.player.lastName}`,
@@ -2116,11 +2256,17 @@ const getCompetitionClubInfo = asyncHandler(async (req, res) => {
   }
 
   // Get any registration for this club in this competition to get manager/coach
+  // If groupId is provided, get info for that specific group
+  const groupId = req.query.groupId ? parseInt(req.query.groupId) : null;
+
+  const where = {
+    competitionId: competitionId,
+    clubId: clubId
+  };
+  if (groupId) where.groupId = groupId;
+
   const registration = await prisma.competitionRegistration.findFirst({
-    where: {
-      competitionId: competitionId,
-      clubId: clubId
-    }
+    where
   });
 
   res.json({
@@ -2165,12 +2311,17 @@ const updateCompetitionClubInfo = asyncHandler(async (req, res) => {
 
   const { managerName, coachName } = await schema.parseAsync(req.body);
 
-  // Update all registrations for this club in this competition
+  // Update registrations - if groupId provided, only update that group's registrations
+  const groupId = req.body.groupId ? parseInt(req.body.groupId) : null;
+
+  const where = {
+    competitionId: competitionId,
+    clubId: clubId
+  };
+  if (groupId) where.groupId = groupId;
+
   await prisma.competitionRegistration.updateMany({
-    where: {
-      competitionId: competitionId,
-      clubId: clubId
-    },
+    where,
     data: {
       managerName: managerName || null,
       coachName: coachName || null
