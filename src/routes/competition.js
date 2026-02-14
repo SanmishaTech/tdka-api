@@ -111,10 +111,22 @@ router.put("/:id/clubs/:clubId/info", auth, competitionController.updateCompetit
  */
 router.get("/:id", auth, competitionController.getCompetition);
 
+const createUploadMiddleware = require("../middleware/uploadMiddleware");
+
+// Configure upload middleware for competitions
+const uploadMiddleware = createUploadMiddleware("competitions", [
+  {
+    name: "banner",
+    allowedTypes: ["image/jpeg", "image/jpg", "image/png"],
+    maxSize: 5 * 1024 * 1024, // 5MB
+  },
+]);
+
 /**
  * @swagger
  * /competitions:
  *   post:
+
  *     summary: Create a new competition
  *     tags: [Competitions]
  *     security:
@@ -161,7 +173,7 @@ router.get("/:id", auth, competitionController.getCompetition);
  *       400:
  *         description: Validation error
  */
-router.post("/", auth, competitionController.createCompetition);
+router.post("/", auth, ...uploadMiddleware, competitionController.createCompetition);
 
 /**
  * @swagger
@@ -212,7 +224,7 @@ router.post("/", auth, competitionController.createCompetition);
  *       400:
  *         description: Validation error
  */
-router.put("/:id", auth, competitionController.updateCompetition);
+router.put("/:id", auth, ...uploadMiddleware, competitionController.updateCompetition);
 
 /**
  * @swagger

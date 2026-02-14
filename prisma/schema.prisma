@@ -164,6 +164,7 @@ model Competition{
   rules            String?   @db.Text
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  banner           String?   // Path to banner image
   
   // Relations
   groups           CompetitionGroup[]

@@ -351,6 +351,7 @@ const getCompetition = asyncHandler(async (req, res) => {
     weight: competition.weight,
     address: competition.address,
     rules: competition.rules,
+    banner: competition.banner,
     createdAt: competition.createdAt,
     updatedAt: competition.updatedAt,
     groups: formattedGroups,
@@ -361,6 +362,38 @@ const getCompetition = asyncHandler(async (req, res) => {
 });
 
 const createCompetition = asyncHandler(async (req, res) => {
+  // Parse body fields if they come as strings (from multipart/form-data)
+  let bodyData = { ...req.body };
+
+  if (req.files && req.files.banner) {
+    const bannerFile = req.files.banner[0];
+    // Store relative path
+    const relativePath = path.relative(process.cwd(), bannerFile.path).replace(/\\/g, '/');
+    bodyData.banner = relativePath;
+  }
+
+  // Handle parsing of JSON strings or numbers that come as form fields
+  if (typeof bodyData.maxPlayers === 'string') bodyData.maxPlayers = parseInt(bodyData.maxPlayers);
+
+  if (typeof bodyData.groups === 'string') {
+    try {
+      bodyData.groups = JSON.parse(bodyData.groups);
+    } catch (e) {
+      // If it's not JSON, might be single value - handle as array? 
+      // But frontend sends JSON string for complex objects
+      console.error("Failed to parse groups JSON", e);
+    }
+  }
+
+  if (typeof bodyData.clubs === 'string') {
+    try {
+      bodyData.clubs = JSON.parse(bodyData.clubs);
+    } catch (e) {
+      // could be comma separated
+      bodyData.clubs = bodyData.clubs.split(',').filter(Boolean);
+    }
+  }
+
   const schema = z.object({
     competitionName: z.string().min(1, "Competition name is required").max(255),
     maxPlayers: z
@@ -379,13 +412,16 @@ const createCompetition = asyncHandler(async (req, res) => {
     weight: z.string().max(255).optional(),
     address: z.string().optional(),
     rules: z.string().optional(),
+    banner: z.string().optional(),
   });
 
   // Will throw Zod errors caught by asyncHandler
-  const validatedData = await schema.parseAsync(req.body);
+  const validatedData = await schema.parseAsync(bodyData);
 
   // Extract groups and clubs for separate handling
   const { groups, clubs, ...competitionData } = validatedData;
+
+  // Cleanup upload if validation fails is handled by middleware
 
   const normalizedCompetitionData = { ...competitionData };
   if (typeof normalizedCompetitionData.weight === "string") {
@@ -440,6 +476,37 @@ const updateCompetition = asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) throw createError(400, "Invalid competition ID");
 
+  // Parse body fields if they come as strings
+  // DEBUG LOGS
+  console.log("updateCompetition req.body:", req.body);
+  console.log("updateCompetition req.files:", req.files);
+
+  let bodyData = { ...req.body };
+
+  if (req.files && req.files.banner) {
+    const bannerFile = req.files.banner[0];
+    const relativePath = path.relative(process.cwd(), bannerFile.path).replace(/\\/g, '/');
+    bodyData.banner = relativePath;
+  }
+
+  if (typeof bodyData.maxPlayers === 'string') bodyData.maxPlayers = parseInt(bodyData.maxPlayers);
+
+  if (typeof bodyData.groups === 'string') {
+    try {
+      bodyData.groups = JSON.parse(bodyData.groups);
+    } catch (e) {
+      console.error("Failed to parse groups JSON", e);
+    }
+  }
+
+  if (typeof bodyData.clubs === 'string') {
+    try {
+      bodyData.clubs = JSON.parse(bodyData.clubs);
+    } catch (e) {
+      bodyData.clubs = bodyData.clubs.split(',').filter(Boolean);
+    }
+  }
+
   const schema = z
     .object({
       competitionName: z.string().min(1).max(255).optional(),
@@ -460,12 +527,13 @@ const updateCompetition = asyncHandler(async (req, res) => {
       weight: z.string().max(255).optional(),
       address: z.string().optional(),
       rules: z.string().optional(),
+      banner: z.string().optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
       message: "At least one field is required",
     });
 
-  const validatedData = await schema.parseAsync(req.body);
+  const validatedData = await schema.parseAsync(bodyData);
 
   const existing = await prisma.competition.findUnique({
     where: { id },
