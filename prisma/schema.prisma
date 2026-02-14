@@ -42,9 +42,12 @@ model Referee {
   emailId                 String?   @unique
   dateOfBirth             DateTime?
   bloodGroup              String?
-  zillaParishadPassYear   Int?
-  statePanchayatPassYear  Int?
-  allIndiaPanchayatPassYear Int?
+  districtParishadPassYear Int?
+  stateRefreeExamPassYear  Int?
+  allIndiaRefreeExamPassYear Int?
+  aadharNumber            String?
+  aadharImage             String?
+  aadharVerified          Boolean   @default(false)
   officeAddress           String?
   officePincode           String?
   officeContactNumber     String?
@@ -115,6 +118,7 @@ model Group{
   groupName        String
   gender           String     
   age              String    
+  ageType          String?   // "UNDER", "ABOVE"
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   competitions     CompetitionGroup[]

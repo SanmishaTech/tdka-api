@@ -51,39 +51,40 @@ const getGroups = asyncHandler(async (req, res) => {
 
   const where = search
     ? {
-        OR: [
-          { groupName: { contains: search } },
-          { gender: { contains: search } },
-          { age: { contains: search } },
-        ],
-      }
+      OR: [
+        { groupName: { contains: search } },
+        { gender: { contains: search } },
+        { age: { contains: search } },
+      ],
+    }
     : {};
 
   // Try to access the model using lowercase 'group' as Prisma might have generated it that way
-const prismaModel = prisma.group || prisma.Group;
+  const prismaModel = prisma.group || prisma.Group;
 
-if (!prismaModel) {
-  throw new Error('Group model not found in Prisma client. Available models: ' + 
-    Object.keys(prisma).filter(key => !key.startsWith('_')).join(', '));
-}
+  if (!prismaModel) {
+    throw new Error('Group model not found in Prisma client. Available models: ' +
+      Object.keys(prisma).filter(key => !key.startsWith('_')).join(', '));
+  }
 
-const [groups, total] = await Promise.all([
-  prismaModel.findMany({
-    where,
-    skip,
-    take: limit,
-    orderBy: { [mappedSortBy]: sortOrder },
-    select: {
-      id: true,
-      groupName: true,
-      gender: true,
-      age: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  }),
-  prismaModel.count({ where }),
-]);
+  const [groups, total] = await Promise.all([
+    prismaModel.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { [mappedSortBy]: sortOrder },
+      select: {
+        id: true,
+        groupName: true,
+        gender: true,
+        age: true,
+        ageType: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    prismaModel.count({ where }),
+  ]);
 
   const totalPages = Math.ceil(total / limit);
 
@@ -111,6 +112,7 @@ const getGroup = asyncHandler(async (req, res) => {
       groupName: true,
       gender: true,
       age: true,
+      ageType: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -126,7 +128,8 @@ const createGroup = asyncHandler(async (req, res) => {
     gender: z.enum(["Men", "Women", "Boys", "Girls"], {
       errorMap: () => ({ message: "Gender must be one of: Men, Women, Boys, Girls" }),
     }),
-    age: z.string().min(1, "Age limit is required").max(50),
+    age: z.string().min(1, "Age limit is required").max(5), // Shortened max because it's a number now
+    ageType: z.enum(["UNDER", "ABOVE"]).optional(),
   });
 
   // Will throw Zod errors caught by asyncHandler
@@ -152,7 +155,8 @@ const updateGroup = asyncHandler(async (req, res) => {
       gender: z.enum(["Men", "Women", "Boys", "Girls"], {
         errorMap: () => ({ message: "Gender must be one of: Men, Women, Boys, Girls" }),
       }).optional(),
-      age: z.string().min(1).max(50).optional(),
+      age: z.string().min(1).max(5).optional(),
+      ageType: z.enum(["UNDER", "ABOVE"]).optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
       message: "At least one field is required",

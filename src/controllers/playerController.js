@@ -932,6 +932,41 @@ const createPlayer = asyncHandler(async (req, res) => {
   const aadharImage = getUploadedFilePath(req, "aadharImage");
 
   try {
+    // Validate Age against Groups
+    if (groupIds.length > 0) {
+      const groups = await prisma.group.findMany({
+        where: { id: { in: groupIds } },
+      });
+
+      const today = new Date();
+      let age = today.getFullYear() - dateOfBirth.getFullYear();
+      const m = today.getMonth() - dateOfBirth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < dateOfBirth.getDate())) {
+        age--;
+      }
+
+      for (const group of groups) {
+        if (group.ageType && group.age) {
+          const limit = parseInt(group.age, 10);
+          if (!isNaN(limit)) {
+            if (group.ageType === "UNDER") {
+              // User: "Under 18 means... under 18". Assuming strictly less than or inclusive u-19?? 
+              // Sticking to previous logic: strict inequality < for "UNDER"?
+              // Actually, let's use standard U-18 logic if possible, but strict < 18 matches "Under 18" wording.
+              // Wait, if I say "Under 18", usually 18 is excluded.
+              if (age >= limit) {
+                throw createError(400, `Player age (${age}) is not under ${limit} for group '${group.groupName}'`);
+              }
+            } else if (group.ageType === "ABOVE") {
+              if (age <= limit) {
+                throw createError(400, `Player age (${age}) is not above ${limit} for group '${group.groupName}'`);
+              }
+            }
+          }
+        }
+      }
+    }
+
     const uniqueIdNumber = await generateUniquePlayerIdNumber();
     const player = await prisma.player.create({
       data: {
@@ -1003,8 +1038,8 @@ const updatePlayer = asyncHandler(async (req, res) => {
 
   const clubId = isAdmin
     ? (body.clubId !== undefined && body.clubId !== null && String(body.clubId).trim() !== ""
-        ? parseInt(body.clubId, 10)
-        : existing.clubId ?? null)
+      ? parseInt(body.clubId, 10)
+      : existing.clubId ?? null)
     : clubIdFromUser ?? existing.clubId ?? null;
 
   const updateData = {
@@ -1031,6 +1066,69 @@ const updatePlayer = asyncHandler(async (req, res) => {
   }
 
   try {
+    // Validate Age against Groups (New + Existing)
+    // If groups are being updated, check all new groups.
+    // If DOB is being updated, check against all current + new groups.
+    // Simplified: Check all resulting groups against (new DOB || old DOB).
+
+    const effectiveDob = updateData.dateOfBirth || existing.dateOfBirth;
+    let effectiveGroupIds = [];
+
+    if (groupIds.length > 0) {
+      // replacing groups
+      effectiveGroupIds = groupIds;
+    } else {
+      // keeping existing groups? No, parseGroupIds returns [] if not provided, 
+      // but update logic is: groups: { set: ... } if groupIds.length > 0.
+      // Wait, if groupIds is empty, we might be keeping existing groups OR clearing them?
+      // Logic in update below: groups: groupIds.length ? { set: ... } : undefined.
+      // So if empty, we keep existing groups.
+      if (body.groupIds === undefined) {
+        // Fetch existing groups
+        const current = await prisma.player.findUnique({ where: { id: playerId }, include: { groups: true } });
+        effectiveGroupIds = current.groups.map(g => g.id);
+      } else {
+        // Explicitly empty array provided -> clearing groups? 
+        // Logic says `groupIds.length ? ... : undefined`. So empty array = undefined = no change.
+        // If user wants to clear groups, they might send empty array but code ignores it?
+        // Actually `parseGroupIds` returns [] for empty input. 
+        // `groupIds.length` check means if 0, we do `undefined`, so NO CHANGE.
+        // If we really want to support verifying existing groups on DOB change, we need them.
+        const current = await prisma.player.findUnique({ where: { id: playerId }, include: { groups: true } });
+        effectiveGroupIds = current.groups.map(g => g.id);
+      }
+    }
+
+    if (effectiveGroupIds.length > 0 && effectiveDob) {
+      const groups = await prisma.group.findMany({
+        where: { id: { in: effectiveGroupIds } },
+      });
+
+      const today = new Date();
+      let age = today.getFullYear() - effectiveDob.getFullYear();
+      const m = today.getMonth() - effectiveDob.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < effectiveDob.getDate())) {
+        age--;
+      }
+
+      for (const group of groups) {
+        if (group.ageType && group.age) {
+          const limit = parseInt(group.age, 10);
+          if (!isNaN(limit)) {
+            if (group.ageType === "UNDER") {
+              if (age >= limit) {
+                throw createError(400, `Player age (${age}) is not under ${limit} for group '${group.groupName}'`);
+              }
+            } else if (group.ageType === "ABOVE") {
+              if (age <= limit) {
+                throw createError(400, `Player age (${age}) is not above ${limit} for group '${group.groupName}'`);
+              }
+            }
+          }
+        }
+      }
+    }
+
     const player = await prisma.player.update({
       where: { id: playerId },
       data: {
@@ -1352,9 +1450,9 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
         aadharVerified: false,
         mismatchReasons: [
           cashfreeResponse?.message ||
-            cashfreeResponse?.error ||
-            cashfreeResponse?.code ||
-            "Failed to verify Aadhaar via Cashfree",
+          cashfreeResponse?.error ||
+          cashfreeResponse?.code ||
+          "Failed to verify Aadhaar via Cashfree",
         ],
         fileReceived,
       });
@@ -1371,9 +1469,9 @@ const verifyAadharOCR = asyncHandler(async (req, res) => {
         aadharVerified: false,
         mismatchReasons: [
           cashfreeResponse?.message ||
-            cashfreeResponse?.error ||
-            cashfreeResponse?.code ||
-            "Failed to verify Aadhaar via Cashfree",
+          cashfreeResponse?.error ||
+          cashfreeResponse?.code ||
+          "Failed to verify Aadhaar via Cashfree",
         ],
         fileReceived,
       });

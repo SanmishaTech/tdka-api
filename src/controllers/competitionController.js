@@ -157,7 +157,17 @@ const getCompetitions = asyncHandler(async (req, res) => {
       include: {
         groups: {
           include: {
-            group: true
+            group: {
+              select: {
+                id: true,
+                groupName: true,
+                gender: true,
+                age: true,
+                ageType: true,
+                createdAt: true,
+                updatedAt: true
+              }
+            }
           }
         },
         clubs: {
@@ -261,7 +271,17 @@ const getCompetition = asyncHandler(async (req, res) => {
     include: {
       groups: {
         include: {
-          group: true
+          group: {
+            select: {
+              id: true,
+              groupName: true,
+              gender: true,
+              age: true,
+              ageType: true,
+              createdAt: true,
+              updatedAt: true
+            }
+          }
         }
       },
       clubs: {
@@ -464,7 +484,21 @@ const createCompetition = asyncHandler(async (req, res) => {
       })
     },
     include: {
-      groups: true,
+      groups: {
+        include: {
+          group: {
+            select: {
+              id: true,
+              groupName: true,
+              gender: true,
+              age: true,
+              ageType: true,
+              createdAt: true,
+              updatedAt: true
+            }
+          }
+        }
+      },
       clubs: true
     }
   });
@@ -988,22 +1022,30 @@ const addPlayersToCompetition = asyncHandler(async (req, res) => {
     let isEligibleForAnyGroup = false;
 
     for (const compGroup of competition.groups) {
-      // Check Gender (assuming 'Boys'/'Men' vs 'Girls'/'Women' or mixed)
-      // If group gender is defined, player must match. 
-      // Note: Player model has 'gender'? The schema view didn't show it explicitly in the snippet but usually it exists.
-      // If not, we might be skipping strict gender check or relying on previous logic.
-      // Existing code didn't check gender explicitly, but let's assume we rely on Date primarily here as requested.
+      // Check Gender - assuming strict gender match if needed, but previously was loose.
+      // Now integrating Age Type logic
+      const eligibilityDate = new Date(compGroup.ageEligibilityDate); // Direct parse, assuming formatted string
+      const ageType = compGroup.group.ageType || "UNDER"; // Default to UNDER if missing
 
-      const eligibilityDate = parseEligibilityDate(compGroup.ageEligibilityDate);
-      if (eligibilityDate) {
-        // Check if player DOB is >= eligibilityDate
-        const dob = player.dateOfBirth instanceof Date ? player.dateOfBirth : new Date(player.dateOfBirth);
-        if (!isNaN(dob) && dob >= eligibilityDate) {
-          isEligibleForAnyGroup = true;
-          break; // Found a valid group
+      if (!isNaN(eligibilityDate.getTime())) {
+        const dob = new Date(player.dateOfBirth);
+        if (!isNaN(dob.getTime())) {
+          if (ageType === "UNDER") {
+            // Must be born ON or AFTER eligibility date (Younger)
+            if (dob >= eligibilityDate) {
+              isEligibleForAnyGroup = true;
+              break;
+            }
+          } else if (ageType === "ABOVE") {
+            // Must be born ON or BEFORE eligibility date (Older)
+            if (dob <= eligibilityDate) {
+              isEligibleForAnyGroup = true;
+              break;
+            }
+          }
         }
       } else {
-        // If no date on group (shouldn't happen with new schema), assume eligible
+        // Fallback if date is invalid (shouldn't happen)
         isEligibleForAnyGroup = true;
         break;
       }
