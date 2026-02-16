@@ -224,6 +224,7 @@ const getCompetitions = asyncHandler(async (req, res) => {
       // ageEligibilityDate removed from root, accessed via groups
       weight: comp.weight,
       rules: comp.rules,
+      banner: comp.banner,
       createdAt: comp.createdAt,
       updatedAt: comp.updatedAt,
       groups: formattedGroups,
