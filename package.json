@@ -4,7 +4,7 @@
   "description": "Simple Node.js REST API",
   "main": "server.js",
   "scripts": {
-    "start": "node dist/server.js",
+    "start": "node server.js",
     "seed": "node prisma/seed.js",
     "dev": "nodemon server.js",
     "migrate": "npx prisma migrate dev",
