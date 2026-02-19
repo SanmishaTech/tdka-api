@@ -674,13 +674,35 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
   if (where.clubId) {
     filters.push(`Club: ${clubNameForHeader || String(where.clubId)}`);
   }
+  if (!isBlankish(groupId)) {
+    try {
+      const group = await prisma.group.findUnique({
+        where: { id: parseInt(String(groupId), 10) },
+        select: { groupName: true },
+      });
+      filters.push(`Group: ${group?.groupName || String(groupId)}`);
+    } catch (_) {
+      filters.push(`Group: ${String(groupId)}`);
+    }
+  }
+  if (!isBlankish(regionId)) {
+    try {
+      const region = await prisma.region.findUnique({
+        where: { id: parseInt(String(regionId), 10) },
+        select: { regionName: true },
+      });
+      filters.push(`Region: ${region?.regionName || String(regionId)}`);
+    } catch (_) {
+      filters.push(`Region: ${String(regionId)}`);
+    }
+  }
   if (isSuspended !== undefined) {
     filters.push(`Suspended: ${isSuspended === "true" ? "Yes" : "No"}`);
   }
   if (aadharVerified !== undefined) {
     filters.push(`Aadhaar Verified: ${aadharVerified === "true" ? "Yes" : "No"}`);
   }
-  const filtersLine = filters.length ? `Filters: ${filters.join(" | ")}` : "All Players";
+  const filtersLine = filters.length ? filters.join(" | ") : "All Players";
 
   const drawLetterhead = () => {
     const pageLeft = doc.page.margins.left;
@@ -715,13 +737,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
       .lineWidth(1)
       .stroke(headerLineColor);
 
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(12)
-      .fillColor("black")
-      .text("Players Export", pageLeft, topY + 64, { width: contentW, align: "center" });
-
-    doc.y = topY + 86;
+    doc.y = topY + 64;
   };
 
   drawLetterhead();
@@ -846,10 +862,17 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
   for (const clubName of clubNames) {
     const clubPlayers = clubGroups.get(clubName) || [];
 
+    const representative = clubPlayers[0];
+    const regionName = representative?.club?.place?.region?.regionName;
+    const placeName = representative?.club?.place?.placeName;
+    const locationParts = [regionName, placeName].filter(Boolean);
+    const locationText = locationParts.length ? locationParts.join(" - ") : "";
+    const headerText = locationText ? `${clubName} [${locationText}]` : String(clubName);
+
     doc.font("Helvetica-Bold").fontSize(12);
-    const clubTitleH = doc.heightOfString(String(clubName), { width: contentW });
+    const clubTitleH = doc.heightOfString(headerText, { width: contentW });
     ensureSpace(clubTitleH + 10, null);
-    doc.fillColor("#111827").text(String(clubName), pageLeft, doc.y, { width: contentW });
+    doc.fillColor("#111827").text(headerText, pageLeft, doc.y, { width: contentW });
     doc.moveDown(0.4);
 
     for (let i = 0; i < clubPlayers.length; i += 2) {
@@ -885,7 +908,7 @@ const exportPlayersPDF = asyncHandler(async (req, res) => {
       };
 
       const rowH = Math.max(measureCardH(leftP), measureCardH(rightP));
-      ensureSpace(rowH + rowGapY, clubName);
+      ensureSpace(rowH + rowGapY, headerText);
 
       const y0 = doc.y;
       await drawPlayerCard(leftP, pageLeft, y0, cardW, rowH);
